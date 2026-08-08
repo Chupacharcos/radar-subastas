@@ -274,3 +274,45 @@ subasta con precios de oferta reales de la zona, además de con el modelo.
 
 Sin credenciales todo funciona igual, apoyándose en el modelo estadístico y
 declarándolo como estimación.
+
+## El entorno: qué hay alrededor del inmueble
+
+Lo que hace que un piso se alquile rápido no es el piso, es tener metro a diez
+minutos y un supermercado a pie. Y lo que hace que se alquile mal tampoco está
+en la ficha: una autovía pegada o una zona sin comercio.
+
+Se usa **OpenStreetMap** vía Overpass. Es la única fuente de equipamiento urbano
+gratuita, sin clave, con cobertura nacional y con una licencia (ODbL) que
+**permite redistribuir citando la fuente** — a diferencia de Google Places, que
+prohíbe mostrar sus datos fuera de sus mapas.
+
+| | Las Rozas (la subasta del ejemplo) | Sol, Madrid |
+|---|---|---|
+| Tren y metro (1,2 km) | 1 | 69 |
+| Supermercados (900 m) | 8 | 158 |
+| Colegios | 11 | 24 |
+| Zonas verdes | 59 | 91 |
+
+Se devuelven los recuentos crudos con su lectura, nunca una «puntuación de
+barrio»: OSM lo mantienen voluntarios y una zona puede estar mejor cartografiada
+que otra. Un número redondo aparentaría una precisión que no existe.
+
+La dirección se geocodifica con Nominatim, limpiando antes el formato del BOE
+(«CALLE FIDIAS NUMERO 11», «184 PL. 5ª PTA»), que ningún geocodificador entiende
+tal cual.
+
+## Fuentes evaluadas y por qué se usa cada una
+
+| Fuente | Estado | Motivo |
+|---|---|---|
+| Portal de Subastas del BOE | **En uso** | Público, ~15.000 subastas/año |
+| Catastro (OVC) | **En uso** | API pública sin clave; la referencia catastral lo conecta todo |
+| INE, Atlas de renta | **En uso** | Renta por municipio y sección censal, descarga oficial |
+| Banco de España | **En uso** | Tipo de referencia oficial, diario |
+| OpenStreetMap (Overpass + Nominatim) | **En uso** | ODbL permite redistribuir citando |
+| Idealista | **Preparado, inactivo** | Requiere clave propia; prohíbe redistribuir |
+| SERPAVI | Descartado por ahora | Alquileres declarados a Hacienda, pero tras reCAPTCHA |
+| Fotocasa, Habitaclia, pisos.com | Descartados | Sin API pública |
+| Google Places | Descartado | Prohíbe almacenar y mostrar fuera de sus mapas |
+| Ministerio del Interior (criminalidad) | Pendiente | Publica en informes trimestrales, sin API |
+| Registradores y Notariado | Pendiente de evaluar | Publican estadística de transacciones reales |

@@ -27,6 +27,7 @@ from riesgo import evaluar as evaluar_riesgo
 from valoracion import valorar
 from inversor import analizar_inversor
 from contexto_zona import evaluar_zona
+from entorno import analizar_entorno, geocodificar
 
 app = FastAPI(
     title="Radar de Subastas",
@@ -150,6 +151,14 @@ def analizar_subasta(datos: AnalisisIn):
             renta_hogar_zona_anual=zona.renta_hogar_anual,
         ).to_dict()
 
+    # Entorno: lo que hace que un piso se alquile rápido o se quede vacío.
+    entorno = None
+    coords = geocodificar(subasta.direccion, subasta.codigo_postal,
+                          inmueble.get("municipio") or subasta.localidad)
+    if coords:
+        entorno = analizar_entorno(*coords).to_dict()
+        entorno["coordenadas"] = {"lat": coords[0], "lon": coords[1]}
+
     return {
         "subasta": subasta.to_dict() | {"url": subasta.url},
         "inmueble": inmueble,
@@ -157,6 +166,7 @@ def analizar_subasta(datos: AnalisisIn):
         "rentabilidad": financiero,
         "metricas_inversor": metricas,
         "contexto_zona": zona.to_dict(),
+        "entorno": entorno,
         "riesgo": riesgo.to_dict(),
     }
 
@@ -176,6 +186,12 @@ def zona(municipio: str = Query(...), provincia: str = Query(None),
          anio_construccion: int = Query(None)):
     """Contexto del entorno: zona tensionada, ITE y eficiencia energética."""
     return evaluar_zona(municipio, provincia, anio_construccion).to_dict()
+
+
+@app.get("/subastas/entorno")
+def entorno_zona(lat: float = Query(...), lon: float = Query(...)):
+    """Transporte, servicios y molestias alrededor de unas coordenadas (OSM)."""
+    return analizar_entorno(lat, lon).to_dict()
 
 
 @app.get("/subastas/vigencia")

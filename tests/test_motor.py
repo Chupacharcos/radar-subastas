@@ -229,6 +229,35 @@ else:
     check("developers.idealista.com" in res.aviso, "y explica cómo solicitarlas")
     check(res.precio_medio_m2 is None, "no se inventa un precio")
 
+
+print("\n=== 18) Entorno (OpenStreetMap) ===")
+from entorno import _clasifica, _lecturas, geocodificar
+
+elementos = [
+    {"tags": {"railway": "station"}}, {"tags": {"railway": "subway_entrance"}},
+    {"tags": {"highway": "bus_stop"}}, {"tags": {"amenity": "school"}},
+    {"tags": {"amenity": "school"}}, {"tags": {"shop": "supermarket"}},
+    {"tags": {"highway": "motorway"}},
+]
+tr, sv, mo = _clasifica(elementos)
+check(tr["estaciones_tren_metro"] == 1 and tr["bocas_de_metro"] == 1, "clasifica transporte")
+check(sv["colegios"] == 2 and sv["supermercados"] == 1, "clasifica servicios")
+check(mo["vias_rapidas"] == 1, "detecta vías rápidas como molestia")
+
+lec = _lecturas(tr, sv, mo)
+check(any("colegios" in l for l in lec), "explica qué implican los colegios")
+check(any("vía rápida" in l for l in lec), "avisa del ruido de la vía rápida")
+
+sin_nada = _lecturas({"estaciones_tren_metro":0,"bocas_de_metro":0,"paradas_bus":0},
+                     {"colegios":0,"centros_salud":0,"farmacias":0,"supermercados":0,"zonas_verdes":0},
+                     {"vias_rapidas":0,"vias_de_tren":0})
+check(any("Sin transporte" in l for l in sin_nada), "sin transporte lo dice claramente")
+check(any("supermercado" in l for l in sin_nada), "sin supermercado también")
+
+# La limpieza de direcciones del BOE es lo que más se rompe al geocodificar
+c = geocodificar("CALLE FIDIAS NUMERO 11", "28232", "LAS ROZAS DE MADRID")
+check(c is not None and 40 < c[0] < 41, f"geocodifica una dirección del BOE ({c})")
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")
