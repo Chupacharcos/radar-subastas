@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, asdict, field
+from formato import euros
 
 CRITICO, ALTO, MEDIO, BAJO = "critico", "alto", "medio", "bajo"
 PESO = {CRITICO: 40, ALTO: 25, MEDIO: 12, BAJO: 4}
@@ -139,7 +140,7 @@ def evaluar(subasta: dict, inmueble: dict | None = None) -> Evaluacion:
         riesgos.append(Riesgo(
             "deuda_supera_valor", MEDIO,
             "La deuda reclamada supera el valor de subasta",
-            f"Se reclaman {reclamada:,.0f} € sobre un inmueble valorado en {valor:,.0f} €. "
+            f"Se reclaman {euros(reclamada)} € sobre un inmueble valorado en {euros(valor)} €. "
             "Suele indicar cargas acumuladas o un bien sobrevalorado en su día.",
             "Revisa el historial registral: puede haber más acreedores.",
         ))

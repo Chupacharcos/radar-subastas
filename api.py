@@ -311,6 +311,28 @@ def zona(municipio: str = Query(...), provincia: str = Query(None),
     return evaluar_zona(municipio, provincia, anio_construccion).to_dict()
 
 
+@app.get("/subastas/alquiler")
+def alquiler(codigo_municipio: str = Query(..., description="Código INE del municipio, 5 dígitos"),
+             codigo_distrito: str = Query(None, description="Código INE del distrito, 7 dígitos")):
+    """Cómo evoluciona el alquiler frente al precio de compra en una zona.
+
+    Con los contratos que se declaran a Hacienda (IPVA) y el índice oficial de
+    precios de vivienda (IPV), ambos del INE. Son índices, no niveles: dicen
+    cuánto sube el alquiler, no cuánto se paga por él.
+    """
+    from alquiler_ine import (distritos_de, precio_vs_alquiler,
+                              tendencia_alquiler_municipio)
+
+    codigo = codigo_municipio.strip().zfill(5)
+    municipio = tendencia_alquiler_municipio(codigo)
+    comparacion = precio_vs_alquiler(codigo, codigo[:2], codigo_distrito)
+    return {
+        "municipio": municipio.to_dict(),
+        "precio_vs_alquiler": comparacion.to_dict(),
+        "distritos_disponibles": distritos_de(codigo),
+    }
+
+
 @app.get("/subastas/entorno")
 def entorno_zona(lat: float = Query(...), lon: float = Query(...)):
     """Transporte, servicios y molestias alrededor de unas coordenadas (OSM)."""

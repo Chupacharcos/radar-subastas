@@ -75,6 +75,7 @@ esa cifra, cada mes pones dinero.
 GET  /subastas/buscar?provincia=madrid&limite=10   Subastas de inmuebles en curso
 POST /subastas/analizar                            Análisis completo de una subasta
 POST /subastas/calculadora                         Rentabilidad de cualquier operación
+GET  /subastas/alquiler?codigo_municipio=28079     Evolución del alquiler frente al precio
 GET  /subastas/provincias                          Provincias con atajo por nombre
 GET  /health
 ```
@@ -96,7 +97,10 @@ curl -X POST http://localhost:8010/subastas/calculadora \
 | [Portal de Subastas del BOE](https://subastas.boe.es) | Subastas judiciales, de Hacienda y de Seguridad Social | Público, sin registro |
 | [Sede Electrónica del Catastro](https://ovc.catastro.meh.es) | Superficie, año y uso del inmueble | API pública, sin clave |
 | `prediccion-precio-inmobiliario` | Valor de mercado (R² 0,90 sobre 21.000 transacciones) | Otro proyecto de este portfolio, MIT |
-| `deteccion-zonas-revalorizacion` | Señal de revalorización por zona | Ídem |
+| `deteccion-zonas-revalorizacion` | Señal de revalorización por zona. **Sus €/m² por barrio son valores de referencia, no precios de mercado observados**, y así se declaran en cada respuesta | Ídem |
+| [INE, Atlas de renta](https://www.ine.es/dynt3/inebase/index.htm?padre=7132) | Renta del hogar por municipio, **distrito y sección censal** | CSV público |
+| [INE, IPVA (op. 432)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736169903) | Evolución del alquiler por municipio y distrito, con los **contratos declarados a Hacienda** | CSV público |
+| [INE, IPV (op. 15)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736152838) | Evolución del precio de compra por comunidad autónoma | CSV público |
 
 **No se usan portales inmobiliarios privados.** Sus APIs exigen aprobación
 manual y sus condiciones prohíben redistribuir los datos. Todo lo que hay aquí
@@ -122,9 +126,33 @@ una estimación por rentabilidad típica, o si el Catastro no respondió.
 > **El alquiler y SERPAVI.** La fuente ideal sería
 > [SERPAVI](https://serpavi.mivau.gob.es/), el sistema estatal de referencia con
 > alquileres **declarados a Hacienda** — contratos reales, no precios de anuncio.
-> Su consulta está protegida con reCAPTCHA, así que no es automatizable de forma
-> fiable. Hasta incorporar su descarga masiva, el alquiler se estima con la
-> rentabilidad bruta típica de la provincia y se marca como estimación.
+> Su consulta está protegida con reCAPTCHA Enterprise, así que no es
+> automatizable de forma fiable, y el ministerio no publica una descarga masiva.
+> Hasta que la haya, el **nivel** del alquiler se estima con la rentabilidad
+> bruta típica de la provincia y se marca como estimación.
+
+### La mitad del problema del alquiler que sí tiene solución
+
+El nivel del alquiler no es público, pero **su evolución sí**. El INE publica el
+**IPVA**, un índice construido con los mismos contratos declarados a Hacienda que
+alimentan SERPAVI, por municipio (los de más de 10.000 habitantes) y por distrito
+de las capitales de provincia.
+
+Eso permite responder algo que el importe de una subasta no dice y que decide una
+compra a años vista: **si en esa zona el alquiler sube más deprisa que el precio
+de compra o al revés**. El otro lado de la comparación es el **IPV**, el índice
+oficial de precios de vivienda. En Madrid, 2024: alquiler +3,6 %, precio +7,7 %.
+La rentabilidad se está estrechando; comprar hoy renta menos que hace un año.
+
+Dos límites que la respuesta declara siempre, porque callarlos sería vender más
+precisión de la que hay:
+
+- **Son índices, no niveles.** Dicen cuánto sube el alquiler, no cuánto se paga.
+- **El IPV sólo llega a comunidad autónoma**, mientras que el IPVA llega a
+  municipio y distrito. Se compara un dato local con uno regional.
+
+Tampoco hay dato del País Vasco ni de Navarra: el IPVA se construye con
+información de la AEAT, y esas dos comunidades tienen haciendas forales.
 
 ### Tratamiento de datos
 
@@ -165,20 +193,24 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 32 comprobaciones
+./venv/bin/python tests/test_motor.py      # 136 comprobaciones
 ```
 
-Los tests no tocan la red: las fórmulas y la detección de riesgos se prueban
-aisladas. El BOE y el Catastro se verifican contra el servicio real, porque un
-test que dependa de que haya subastas activas fallaría un lunes cualquiera por
-motivos ajenos al código.
+El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
+subastas activas en Madrid fallaría un lunes cualquiera por motivos ajenos al
+código. Se verifican contra el servicio real con `vigencia.py`.
+
+Lo que sí se prueba es lo que puede romperse en silencio y arruinar una decisión
+de compra: las fórmulas, la detección de riesgos y el emparejamiento de zonas.
+Las comprobaciones sobre datos del INE sí bajan sus CSV la primera vez —y de paso
+verifican que las tablas siguen existiendo con el mismo identificador.
 
 ## Stack
 
 | Capa | Tecnología |
 |---|---|
 | API | FastAPI + Uvicorn |
-| Fuentes | BOE (HTML público) · Catastro (JSON) |
+| Fuentes | BOE (HTML público) · Catastro (JSON) · INE (CSV: Atlas de renta, IPVA, IPV) · Banco de España · OpenStreetMap |
 | Cálculo | Sistema francés de amortización, ITP por comunidad |
 | Valoración | Reutiliza los modelos del portfolio vía HTTP |
 
@@ -194,6 +226,7 @@ un error: la calculadora seguiría devolviendo cifras con total aplomo.
 | Tipos de ITP | Con cada ley autonómica | Revisión manual fechada en `impuestos.REVISADO`; `vigencia.py` avisa a los 180 días |
 | Aranceles notariales | Años | Regulados por RD; revisión manual |
 | HTML del portal del BOE | Sin aviso | Cada extracción declara `campos_ausentes`; `vigencia.py` lo comprueba contra el portal real |
+| Índices del INE (renta, IPVA, IPV) | Una vez al año | `vigencia.py` avisa si el último año publicado se queda más de dos ejercicios atrás: sería señal de que la tabla cambió de identificador o de que la operación dejó de publicarse |
 
 ```bash
 python vigencia.py          # informe por consola
@@ -241,11 +274,29 @@ se marca **«probable»** y se pide comprobarlo, en lugar de afirmar que no lo e
 
 ### Renta real del barrio, no supuestos
 
-La renta media del hogar sale del **Atlas de distribución de renta del INE**,
-con dato por municipio y sección censal. Con ella se calcula el **esfuerzo del
-inquilino**: si el alquiler supera el 35 % de lo que entra en los hogares de esa
-zona, el problema no es que el inquilino no quiera pagar, es que no puede — y
-eso predice impago y rotación mejor que ninguna otra variable.
+La renta media del hogar sale del **Atlas de distribución de renta del INE**.
+Con ella se calcula el **esfuerzo del inquilino**: si el alquiler supera el 35 %
+de lo que entra en los hogares de esa zona, el problema no es que el inquilino no
+quiera pagar, es que no puede — y eso predice impago y rotación mejor que ninguna
+otra variable.
+
+La media del municipio es demasiado gruesa para eso, así que se baja de grano:
+
+- **Por distrito censal.** En Madrid capital va de 79.274 € en Chamartín a
+  32.666 € en Puente de Vallecas. La media del municipio, 49.916 €, no describe a
+  ninguno de los dos. El INE publica sus distritos numerados y sin nombre, así que
+  la correspondencia con los barrios se verificó cruzando esa renta con el orden
+  socioeconómico conocido de cada ciudad; sólo están **Madrid y Barcelona**,
+  porque son las dos que se pudieron comprobar así.
+- **Por sección censal**, en forma de horquilla. Las 2.450 secciones de Madrid
+  van de 17.450 € a 104.774 €. Las secciones enteras no se guardan porque sin la
+  cartografía del seccionado no se sabe en qué sección cae una dirección, pero la
+  horquilla ya avisa de cuánto esconde la media.
+
+> Un detalle que hay que declarar: **el INE censura por arriba**. 82 de las 2.450
+> secciones de Madrid publican exactamente 104.774 €, que es un techo, no un
+> máximo real. El destilado lo detecta y lo marca como `maximo_censurado`, para
+> no presentar un tope como si fuera un dato.
 
 La API JSON del INE rechaza estas tablas por volumen, así que se usa la descarga
 CSV oficial: se baja una vez por provincia, se destila a lo mínimo útil y se

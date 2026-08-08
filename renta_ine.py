@@ -15,9 +15,20 @@ Sobre el acceso: la API JSON del INE rechaza estas tablas por volumen
 CSV oficial, que sí funciona. Cada provincia es una tabla distinta; el mapa
 `TABLA_POR_PROVINCIA` se construyó sondeando las 54 tablas de la operación 353.
 
-Los ficheros pesan más de 100 MB, de modo que se descargan bajo demanda, se
-destilan a lo mínimo útil (municipio → renta del último año) y se cachea el
-resultado. Una provincia ocupa unos pocos KB tras destilar.
+Los ficheros pesan decenas de MB, de modo que se descargan bajo demanda, se
+destilan a lo mínimo útil y se cachea el resultado.
+
+Del grano fino se guardan dos cosas:
+
+  - la renta de cada **distrito**, que es la que de verdad describe el sitio: en
+    Madrid capital va de 79.274 € en Chamartín a 32.666 € en Puente de Vallecas,
+    y la media del municipio —que es lo único que había antes— no distingue uno
+    de otro;
+  - un resumen de la dispersión entre **secciones censales** (cuántas hay, mínimo,
+    mediana y máximo). Las secciones enteras no se guardan porque para usarlas
+    haría falta saber en qué sección cae una dirección, y eso exige la
+    cartografía del seccionado; el resumen, en cambio, ya avisa de cuánto esconde
+    la media.
 """
 from __future__ import annotations
 
@@ -25,8 +36,9 @@ import csv
 import io
 import json
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
+from statistics import median
 from pathlib import Path
 
 import httpx
@@ -36,6 +48,11 @@ CSV_URL = "https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/{tabla}.csv"
 INDICADOR = "Renta neta media por hogar"
 TIMEOUT = 180.0
 MAX_BYTES = 200 * 1024 * 1024
+
+# Versión del destilado. Al subirla, las cachés viejas se ignoran y se vuelven a
+# generar: si no, un fichero anterior sin distritos se daría por bueno para
+# siempre.
+FORMATO = 2
 
 # Código INE de provincia → tabla del Atlas de renta (operación 353).
 # Sondeado el 2026-08-08 leyendo la cabecera de cada CSV.
@@ -59,6 +76,8 @@ class Renta:
     renta_hogar_anual: float | None = None
     renta_persona_anual: float | None = None
     anio: int | None = None
+    distritos: list[dict] = field(default_factory=list)
+    dispersion_secciones: dict | None = None
     fuente: str = "INE, Atlas de distribución de renta de los hogares"
     error: str | None = None
 
@@ -84,12 +103,25 @@ def _cache_path(cp: str) -> Path:
     return CACHE_DIR / f"{cp}.json"
 
 
-def _destila(contenido: str) -> dict:
-    """CSV completo → {codigo_municipio: {nombre, hogar, persona, anio}}.
+def _acumula(reg: dict, anio: int, indicador: str, valor: float) -> None:
+    """Guarda el valor si es del año más reciente visto para ese registro."""
+    if anio < reg["anio"]:
+        return
+    if anio > reg["anio"]:
+        reg.update({"anio": anio, "hogar": None, "persona": None})
+    reg["hogar" if indicador == INDICADOR else "persona"] = valor
 
-    Sólo se guardan filas de municipio (sin distrito ni sección) para que la
-    caché sea pequeña; el grano de sección se puede añadir después sin cambiar
-    el formato.
+
+def _destila(contenido: str) -> dict:
+    """CSV completo → {codigo_municipio: {nombre, hogar, persona, anio,
+    distritos, secciones}}.
+
+    El CSV trae las tres granularidades mezcladas en la misma tabla y se
+    distinguen por qué columnas vienen rellenas: sólo municipio, municipio +
+    distrito, o los tres. De las secciones sólo sobrevive el resumen
+    estadístico: guardar las ~36.000 del país no serviría de nada sin la
+    cartografía que dice en qué sección cae cada dirección, pero el resumen ya
+    avisa de cuánto esconde la media del municipio.
     """
     out: dict[str, dict] = {}
     lector = csv.DictReader(io.StringIO(contenido), delimiter=";")
@@ -102,9 +134,12 @@ def _destila(contenido: str) -> dict:
     if not col_ind:
         return out
 
+    # Renta por hogar de cada sección, por año, para el resumen de dispersión.
+    secciones: dict[str, dict[int, dict[str, float]]] = {}
+
     for fila in lector:
         muni = (fila.get(col_muni) or "").strip()
-        if not muni or fila.get("Distritos") or fila.get("Secciones"):
+        if not muni:
             continue
         indicador = (fila.get(col_ind) or "").strip()
         if indicador not in (INDICADOR, "Renta neta media por persona"):
@@ -119,14 +154,52 @@ def _destila(contenido: str) -> dict:
 
         codigo, _, nombre = muni.partition(" ")
         reg = out.setdefault(codigo, {"nombre": nombre.strip(), "anio": 0,
-                                      "hogar": None, "persona": None})
-        # Nos quedamos con el año más reciente disponible.
-        if anio < reg["anio"]:
+                                      "hogar": None, "persona": None,
+                                      "distritos": {}})
+        distrito = (fila.get("Distritos") or "").strip()
+        seccion = (fila.get("Secciones") or "").strip()
+
+        if seccion:
+            if indicador == INDICADOR:
+                secciones.setdefault(codigo, {}).setdefault(anio, {})[
+                    seccion.partition(" ")[0]] = valor
+        elif distrito:
+            _acumula(reg["distritos"].setdefault(
+                distrito.partition(" ")[0],
+                {"anio": 0, "hogar": None, "persona": None}),
+                anio, indicador, valor)
+        else:
+            _acumula(reg, anio, indicador, valor)
+
+    # El INE censura por arriba: en la provincia de Madrid, 134 secciones de
+    # municipios distintos declaran exactamente 104.774 €, y 82 de ellas están en
+    # la capital. No es el máximo, es un techo. Se detecta como el valor más alto
+    # que se repite en varias secciones de la provincia, y se marca para no
+    # presentarlo nunca como si fuera un dato.
+    todas: dict[int, list[float]] = {}
+    for por_anio in secciones.values():
+        for anio, valores in por_anio.items():
+            todas.setdefault(anio, []).extend(valores.values())
+    topes = {anio: max(v) for anio, v in todas.items() if v}
+    es_tope = {anio: v.count(topes[anio]) >= 3 for anio, v in todas.items() if v}
+
+    for codigo, por_anio in secciones.items():
+        if codigo not in out or not por_anio:
             continue
-        if anio > reg["anio"]:
-            reg.update({"anio": anio, "hogar": None, "persona": None})
-        clave = "hogar" if indicador == INDICADOR else "persona"
-        reg[clave] = valor
+        anio = max(por_anio)
+        valores = sorted(por_anio[anio].values())
+        if len(valores) < 2:
+            continue
+        topado = es_tope.get(anio) and valores[-1] == topes[anio]
+        out[codigo]["secciones"] = {
+            "anio": anio,
+            "total": len(valores),
+            "minimo": valores[0],
+            "mediana": round(median(valores), 2),
+            "maximo": valores[-1],
+            "maximo_censurado": bool(topado),
+            "secciones_en_el_tope": valores.count(topes[anio]) if topado else 0,
+        }
     return out
 
 
@@ -135,7 +208,9 @@ def _carga_provincia(cp: str, forzar: bool = False) -> dict:
     destino = _cache_path(cp)
     if destino.exists() and not forzar:
         try:
-            return json.loads(destino.read_text(encoding="utf-8"))["municipios"]
+            guardado = json.loads(destino.read_text(encoding="utf-8"))
+            if guardado.get("formato") == FORMATO:
+                return guardado["municipios"]
         except Exception:
             pass
 
@@ -159,10 +234,35 @@ def _carga_provincia(cp: str, forzar: bool = False) -> dict:
     destino.write_text(json.dumps({
         "provincia": cp,
         "tabla_ine": tabla,
+        "formato": FORMATO,
         "descargado": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "municipios": municipios,
     }, ensure_ascii=False), encoding="utf-8")
     return municipios
+
+
+def _a_renta(codigo: str, datos: dict) -> Renta:
+    """Registro destilado → respuesta, con sus distritos ordenados de mayor a
+    menor renta: así se ve de un vistazo la horquilla que esconde la media."""
+    distritos = [
+        {"codigo": cod,
+         "renta_hogar_anual": d.get("hogar"),
+         "renta_persona_anual": d.get("persona"),
+         "anio": d.get("anio") or None}
+        for cod, d in sorted((datos.get("distritos") or {}).items())
+        if d.get("hogar") is not None
+    ]
+    distritos.sort(key=lambda d: -(d["renta_hogar_anual"] or 0))
+
+    return Renta(
+        municipio=datos["nombre"],
+        codigo_ine=codigo,
+        renta_hogar_anual=datos.get("hogar"),
+        renta_persona_anual=datos.get("persona"),
+        anio=datos.get("anio") or None,
+        distritos=distritos,
+        dispersion_secciones=datos.get("secciones"),
+    )
 
 
 def consultar(municipio: str, codigo_provincia: str,
@@ -184,11 +284,7 @@ def consultar(municipio: str, codigo_provincia: str,
     if codigo_municipio:
         clave = cp + str(codigo_municipio).zfill(3)
         if clave in municipios:
-            datos = municipios[clave]
-            return Renta(municipio=datos["nombre"], codigo_ine=clave,
-                         renta_hogar_anual=datos.get("hogar"),
-                         renta_persona_anual=datos.get("persona"),
-                         anio=datos.get("anio") or None)
+            return _a_renta(clave, municipios[clave])
 
     # 2) Por nombre. El INE invierte el artículo («Rozas de Madrid, Las») y el
     #    Catastro no («LAS ROZAS DE MADRID»), así que se compara la forma
@@ -213,11 +309,30 @@ def consultar(municipio: str, codigo_provincia: str,
         return Renta(municipio=municipio,
                      error=f"«{municipio}» no aparece en el Atlas de la provincia {cp}")
 
-    codigo, datos = mejor
-    return Renta(
-        municipio=datos["nombre"],
-        codigo_ine=codigo,
-        renta_hogar_anual=datos.get("hogar"),
-        renta_persona_anual=datos.get("persona"),
-        anio=datos.get("anio") or None,
-    )
+    return _a_renta(*mejor)
+
+
+def renta_distrito(codigo_distrito: str) -> dict | None:
+    """Renta de un distrito por su código de 7 dígitos (5 municipio + 2 distrito).
+
+    Es el grano al que de verdad cambia un sitio: en Madrid capital la media del
+    municipio no distingue Chamartín de Puente de Vallecas, y entre esos dos hay
+    más de 46.000 € de diferencia por hogar.
+    """
+    codigo = str(codigo_distrito).strip()
+    if len(codigo) != 7 or not codigo.isdigit():
+        return None
+    try:
+        municipios = _carga_provincia(codigo[:2])
+    except Exception:
+        return None
+    datos = (municipios.get(codigo[:5]) or {}).get("distritos", {}).get(codigo)
+    if not datos:
+        return None
+    return {
+        "codigo": codigo,
+        "renta_hogar_anual": datos.get("hogar"),
+        "renta_persona_anual": datos.get("persona"),
+        "anio": datos.get("anio") or None,
+        "fuente": Renta.fuente,
+    }

@@ -150,6 +150,41 @@ def comprobar() -> list[Comprobacion]:
             "API del Catastro", "caducado", f"No se pudo consultar: {type(e).__name__}.",
         ))
 
+    # 6. Índices del INE: son anuales, así que lo que hay que vigilar no es que
+    #    respondan, sino que no se hayan quedado atrás. Si en 2027 el último dato
+    #    del alquiler sigue siendo 2024, o el INE dejó de publicar o la tabla
+    #    cambió de identificador.
+    try:
+        from alquiler_ine import frescura
+        anio_actual = datetime.now(timezone.utc).year
+        for nombre, datos in frescura().items():
+            if datos.get("error"):
+                resultados.append(Comprobacion(
+                    f"INE · {nombre}", "caducado",
+                    f"No se pudo cargar la tabla {datos['tabla_ine']}: {datos['error']}.",
+                ))
+                continue
+            ultimo = datos.get("ultimo_anio")
+            retraso = anio_actual - ultimo if ultimo else None
+            # El INE publica el año n a lo largo del n+1, así que dos años de
+            # retraso es lo normal a principios de año y tres ya no lo es.
+            if retraso is None:
+                estado, detalle = "caducado", "La tabla no trajo ningún año."
+            elif retraso > 2:
+                estado = "caducado"
+                detalle = (f"El último dato es de {ultimo}, {retraso} años atrás. "
+                           f"Revisa si la tabla {datos['tabla_ine']} cambió de "
+                           f"identificador o si la operación dejó de publicarse.")
+            else:
+                estado = "ok"
+                detalle = (f"{datos['series']} series, último año publicado {ultimo} "
+                           f"(tabla {datos['tabla_ine']}).")
+            resultados.append(Comprobacion(f"INE · {nombre}", estado, detalle))
+    except Exception as e:
+        resultados.append(Comprobacion(
+            "Índices del INE", "caducado", f"No se pudieron comprobar: {type(e).__name__}.",
+        ))
+
     return resultados
 
 

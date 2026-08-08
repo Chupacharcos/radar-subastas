@@ -26,6 +26,7 @@ import os
 from dataclasses import dataclass, asdict
 
 import httpx
+from formato import euros
 
 PRECIO_URL = os.getenv("PRECIO_API_URL", "http://127.0.0.1:8089")
 REVALORIZACION_URL = os.getenv("REVALORIZACION_API_URL", "http://127.0.0.1:8090")
@@ -120,7 +121,7 @@ def _estimar_valor_mercado(inmueble: dict, avisos: list[str]) -> float | None:
     if error_pct:
         avisos.append(
             f"La valoración de mercado tiene un error medio del {error_pct}% "
-            f"(rango {datos.get('range_low', 0):,.0f} – {datos.get('range_high', 0):,.0f} €). "
+            f"(rango {euros(datos.get('range_low', 0))} – {euros(datos.get('range_high', 0))} €). "
             "El descuento calculado hereda esa incertidumbre."
         )
     return float(precio)

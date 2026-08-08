@@ -258,6 +258,104 @@ check(any("supermercado" in l for l in sin_nada), "sin supermercado también")
 c = geocodificar("CALLE FIDIAS NUMERO 11", "28232", "LAS ROZAS DE MADRID")
 check(c is not None and 40 < c[0] < 41, f"geocodifica una dirección del BOE ({c})")
 
+print("\n=== 19) Renta por distrito y sección (Atlas del INE) ===")
+from renta_ine import renta_distrito
+
+md = consultar_renta("MADRID", "28", "079")
+check(len(md.distritos) == 21, f"Madrid capital trae sus 21 distritos ({len(md.distritos)})")
+check(md.distritos == sorted(md.distritos, key=lambda d: -d["renta_hogar_anual"]),
+      "los distritos vienen ordenados de mayor a menor renta")
+# Verificación de que la numeración del INE es la del ayuntamiento: si algún día
+# el INE renumera, esto salta antes de que el mapa de barrios mienta.
+check(md.distritos[0]["codigo"] == "2807905",
+      f"el distrito más rico de Madrid es el 05, Chamartín ({md.distritos[0]['codigo']})")
+check(md.distritos[-1]["codigo"] == "2807913",
+      f"y el de menor renta el 13, Puente de Vallecas ({md.distritos[-1]['codigo']})")
+check(md.renta_hogar_anual < md.distritos[0]["renta_hogar_anual"],
+      "la media del municipio queda por debajo de su mejor distrito")
+
+d = renta_distrito("2807905")
+check(d and d["renta_hogar_anual"] > 70_000, "se puede consultar un distrito suelto")
+check(renta_distrito("2807999") is None, "un distrito inexistente devuelve None, no un número")
+check(renta_distrito("28079") is None, "un código que no es de distrito tampoco cuela")
+
+disp = md.dispersion_secciones
+check(disp and disp["total"] > 2_000, f"resume las {disp['total']} secciones de Madrid")
+check(disp["minimo"] < disp["mediana"] < disp["maximo"], "mínimo < mediana < máximo")
+# El INE censura por arriba: 82 secciones de Madrid comparten el mismo valor.
+check(disp["maximo_censurado"] is True, "detecta que el máximo es un tope del INE")
+check(disp["secciones_en_el_tope"] > 10,
+      f"y dice cuántas secciones están en él ({disp['secciones_en_el_tope']})")
+
+
+print("\n=== 20) Evolución del alquiler y del precio (IPVA e IPV del INE) ===")
+from alquiler_ine import (PROVINCIA_A_CCAA, distritos_de, precio_vs_alquiler,
+                          tendencia_alquiler_distrito, tendencia_alquiler_municipio,
+                          tendencia_precio_compra)
+
+check(len(PROVINCIA_A_CCAA) == 52, f"{len(PROVINCIA_A_CCAA)} provincias mapeadas a su comunidad")
+check(PROVINCIA_A_CCAA["28"] == "13" and PROVINCIA_A_CCAA["08"] == "09",
+      "Madrid → 13 y Barcelona → 09")
+
+t = tendencia_alquiler_municipio("28079")
+check(t.error is None and t.indice > 100, f"Madrid: índice {t.indice} ({t.anio})")
+check(t.base == "2015 = 100", "declara la base del índice")
+check(abs(t.acumulada_desde_base_pct - (t.indice - 100)) < 0.01,
+      "el acumulado desde la base es el propio índice menos 100")
+# Municipio de menos de 10.000 habitantes: el INE no lo publica.
+pequeno = tendencia_alquiler_municipio("28002")
+check(pequeno.error is not None and "10.000" in pequeno.error,
+      "un municipio pequeño devuelve un error que explica por qué")
+
+check(len(distritos_de("28079")) == 21, "Madrid tiene 21 distritos en el IPVA")
+check(distritos_de("48020") == [], "Bilbao no está: el IPVA se construye con datos de la AEAT")
+check(tendencia_alquiler_distrito("2807904").error is None, "hay dato del distrito Salamanca")
+check(tendencia_alquiler_distrito("2807999").error is not None,
+      "un distrito inexistente da error, no un número")
+
+p = tendencia_precio_compra("28")
+check(p.error is None and p.nombre.startswith("Madrid"), "IPV de la Comunidad de Madrid")
+check(tendencia_precio_compra("99").error is not None, "provincia inexistente da error")
+
+cmp = precio_vs_alquiler("28079", "28")
+check(cmp.error is None and cmp.anio is not None, f"compara ambos índices en {cmp.anio}")
+check(abs(cmp.brecha_pp - (cmp.variacion_alquiler_pct - cmp.variacion_precio_pct)) < 0.01,
+      "la brecha es la resta de las dos variaciones")
+check(any("ámbito municipio" in a for a in cmp.avisos),
+      "avisa de que el precio es regional y el alquiler municipal")
+check(any("índices, no precios" in a for a in cmp.avisos),
+      "y de que son índices, no niveles en €")
+
+
+print("\n=== 21) De barrio a distrito censal ===")
+import distritos as dist
+
+check(dist.municipio_de("madrid") == "28079", "Madrid resuelve a su código INE")
+check(dist.municipio_de("Valencia") is None, "una ciudad sin verificar no resuelve")
+
+sal = dist.distrito_de("madrid", "Salamanca")
+check(sal["codigo"] == "2807904" and sal["nombre"] == "Salamanca", "Salamanca → distrito 04")
+check(sal["el_barrio_es_parte_del_distrito"] is False,
+      "el barrio que se llama como su distrito no se marca como parte de él")
+
+mal = dist.distrito_de("madrid", "Malasaña")
+check(mal["codigo"] == "2807901", "Malasaña cae en Centro")
+check(mal["el_barrio_es_parte_del_distrito"] is True, "y se declara que es sólo una parte")
+check(dist.distrito_de("madrid", "Lavapiés")["codigo"] == mal["codigo"],
+      "Lavapiés comparte distrito con Malasaña")
+
+# Los nombres con signos y acentos son los que rompen los emparejamientos.
+check(dist.distrito_de("barcelona", "Poblenou (22@)")["codigo"] == "0801910",
+      "«Poblenou (22@)» encuentra su distrito pese a los signos")
+check(dist.distrito_de("barcelona", "Gràcia")["codigo"] == "0801906", "«Gràcia» con acento")
+check(dist.distrito_de("madrid", "Barrio Inventado") is None,
+      "un barrio desconocido devuelve None en lugar de asignarlo a ojo")
+check(dist.distrito_de("valencia", "Ruzafa") is None,
+      "y una ciudad sin verificar no asigna distritos")
+check(all(c in dist.NOMBRES for m in dist.BARRIO_A_DISTRITO.values() for c in m.values()),
+      "todo distrito del mapa de barrios tiene nombre oficial")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

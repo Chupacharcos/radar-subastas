@@ -26,6 +26,7 @@ como pendientes en lugar de inventarse un número.
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict, field
+from formato import euros
 
 REVISADO = "2026-08-08"
 
@@ -69,6 +70,8 @@ class ContextoZona:
     zona_tensionada_certeza: str = "desconocida"   # confirmada | probable | descartada | desconocida
     renta_hogar_anual: float | None = None
     renta_es_estimacion: bool = True
+    renta_dispersion_secciones: dict | None = None
+    evolucion_alquiler: dict | None = None
     antiguedad_anios: int | None = None
     ite_situacion: str | None = None
     factores: list[dict] = field(default_factory=list)
@@ -84,6 +87,24 @@ def _normaliza(t: str) -> str:
     return t.strip().lower().translate(acentos)
 
 
+def _evolucion_alquiler(codigo_provincia: str | None,
+                        codigo_municipio: str | None) -> dict | None:
+    """Cuánto sube el alquiler en ese municipio frente al precio de compra.
+
+    Es lo que separa un piso que hoy renta poco pero mejora cada año de otro que
+    va al revés, y ninguna de las dos cosas se ve en el importe de la subasta.
+    """
+    if not (codigo_provincia and codigo_municipio):
+        return None
+    try:
+        from alquiler_ine import precio_vs_alquiler
+        codigo = str(codigo_provincia).zfill(2) + str(codigo_municipio).zfill(3)
+        r = precio_vs_alquiler(codigo, codigo_provincia)
+        return r.to_dict() if not r.error else None
+    except Exception:
+        return None
+
+
 def evaluar_zona(municipio: str | None, provincia: str | None = None,
                  anio_construccion: int | None = None,
                  renta_hogar_anual: float | None = None,
@@ -94,17 +115,21 @@ def evaluar_zona(municipio: str | None, provincia: str | None = None,
     Si se pasan los códigos INE (los devuelve el Catastro), la renta del hogar
     se consulta al Atlas del INE y deja de ser una estimación."""
     # La renta real manda sobre cualquier supuesto.
+    dispersion = None
     if renta_hogar_anual is None and codigo_ine_provincia:
         try:
             from renta_ine import consultar as consultar_renta
             r = consultar_renta(municipio or "", codigo_ine_provincia, codigo_ine_municipio)
             if r.renta_hogar_anual:
                 renta_hogar_anual = r.renta_hogar_anual
+                dispersion = r.dispersion_secciones
         except Exception:
             pass   # sin renta se sigue: el resto del contexto no depende de ella
 
     ctx = ContextoZona(municipio=municipio, renta_hogar_anual=renta_hogar_anual,
-                       renta_es_estimacion=False if renta_hogar_anual else True)
+                       renta_es_estimacion=False if renta_hogar_anual else True,
+                       renta_dispersion_secciones=dispersion)
+    ctx.evolucion_alquiler = _evolucion_alquiler(codigo_ine_provincia, codigo_ine_municipio)
     factores: list[dict] = []
 
     # 1. Zona tensionada — límite legal a los ingresos
@@ -185,11 +210,43 @@ def evaluar_zona(municipio: str | None, provincia: str | None = None,
     # 3. Capacidad de pago de la zona
     if renta_hogar_anual:
         factores.append({
-            "factor": f"Renta media del hogar en la zona: {renta_hogar_anual:,.0f} €/año",
+            "factor": f"Renta media del hogar en la zona: {euros(renta_hogar_anual)} €/año",
             "efecto": "informativo",
             "detalle": "Determina qué alquiler puede pagar de verdad quien vive allí.",
             "implicacion": "Un alquiler por encima del 35 % de esa renta genera impagos y rotación.",
             "fuente": "INE, Atlas de distribución de renta de los hogares (dato real)",
+        })
+
+        d = ctx.renta_dispersion_secciones
+        if d and d["maximo"] > d["minimo"] * 1.5:
+            techo = f"{euros(d['maximo'])} €" + (" o más" if d.get("maximo_censurado") else "")
+            factores.append({
+                "factor": f"Dentro del municipio la renta va de {euros(d['minimo'])} € a {techo}",
+                "efecto": "informativo",
+                "detalle": f"Las {d['total']} secciones censales del municipio ({d['anio']}) "
+                           f"tienen una mediana de {euros(d['mediana'])} €. La media del "
+                           "municipio mezcla realidades muy distintas.",
+                "implicacion": "La capacidad de pago de la calle concreta puede estar muy "
+                               "lejos de la media que se usa en los cálculos. Conviene "
+                               "mirar el barrio, no el municipio.",
+                "fuente": "INE, Atlas de renta por sección censal (dato real)"
+                          + (". El INE censura por arriba: las secciones más ricas se "
+                             "publican todas con el mismo valor tope"
+                             if d.get("maximo_censurado") else ""),
+            })
+
+    # 4. Hacia dónde va el alquiler, que es lo que decide la inversión a años
+    if ctx.evolucion_alquiler:
+        e = ctx.evolucion_alquiler
+        factores.append({
+            "factor": (f"En {e['anio']} el alquiler subió un {e['variacion_alquiler_pct']} % "
+                       f"y el precio de compra un {e['variacion_precio_pct']} %"),
+            "efecto": "positivo" if (e["brecha_pp"] or 0) > 0 else "negativo",
+            "detalle": e["lectura"],
+            "implicacion": "Comprar para alquilar se decide a años vista: importa menos el "
+                           "precio de hoy que hacia dónde van alquiler y precio.",
+            "fuente": "INE, IPVA (contratos declarados a Hacienda) e IPV. Son índices: "
+                      "miden cuánto sube, no cuánto se paga.",
         })
 
     ctx.factores = factores
