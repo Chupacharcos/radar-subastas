@@ -181,3 +181,46 @@ motivos ajenos al código.
 | Fuentes | BOE (HTML público) · Catastro (JSON) |
 | Cálculo | Sistema francés de amortización, ITP por comunidad |
 | Valoración | Reutiliza los modelos del portfolio vía HTTP |
+
+## Los datos caducan: cómo se mantiene esto vivo
+
+El riesgo real de una herramienta así no es equivocarse hoy, sino seguir
+diciendo lo mismo dentro de seis meses cuando ya no sea cierto. Nada de eso da
+un error: la calculadora seguiría devolviendo cifras con total aplomo.
+
+| Dato | Cada cuánto cambia | Cómo se mantiene |
+|---|---|---|
+| Tipo de referencia del BCE | Semanas | Se descarga del Banco de España (serie `ti_1_1`) y se cachea 7 días, declarando siempre la fecha del dato |
+| Tipos de ITP | Con cada ley autonómica | Revisión manual fechada en `impuestos.REVISADO`; `vigencia.py` avisa a los 180 días |
+| Aranceles notariales | Años | Regulados por RD; revisión manual |
+| HTML del portal del BOE | Sin aviso | Cada extracción declara `campos_ausentes`; `vigencia.py` lo comprueba contra el portal real |
+
+```bash
+python vigencia.py          # informe por consola
+python vigencia.py --json   # para engancharlo a un monitor
+curl localhost:8010/subastas/vigencia
+```
+
+Comprueba cinco cosas: antigüedad de la revisión de los tipos, que el tipo del
+BCE se descargue y sea reciente, que estén las 17 comunidades, que el portal del
+BOE siga sirviendo los campos esperados y que la API del Catastro responda.
+
+### Correcciones ya aplicadas por esta verificación
+
+La primera versión llevaba tipos escritos de memoria. Al contrastarlos:
+
+- **Cantabria figuraba al 9 %; el tipo general es el 10 %.** Sobre 200.000 €
+  son 2.000 € de diferencia.
+- **Cataluña no es un tipo plano**: desde el Decreto Ley 5/2025 es una escala
+  10 % / 11 % / 12 % por tramos, con un 20 % para grandes tenedores. Sobre
+  817.000 € la diferencia frente al 10 % plano son 2.170 €.
+- **Baleares y Extremadura también son escalas**, no tipos únicos.
+- **Los aranceles de notaría y registro no son un importe fijo**: escalan con el
+  precio. Antes se usaban 2.500 € para todo, lo que sobrestimaba en inmuebles
+  baratos y se quedaba corto en los caros.
+- En **subasta judicial no hay escritura de compraventa**, sólo el testimonio del
+  decreto de adjudicación, así que el coste notarial es menor que en una compra
+  ordinaria.
+
+Cada tipo cita ahora su norma en `impuestos.py`, y los tests contrastan las 17
+comunidades contra los valores verificados.

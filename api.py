@@ -139,6 +139,25 @@ def analizar_subasta(datos: AnalisisIn):
     }
 
 
+@app.get("/subastas/vigencia")
+def vigencia():
+    """Estado de frescura de los datos: tipos de ITP, tipo de referencia del
+    BCE y las dos fuentes externas. Pensado para engancharlo a un monitor."""
+    from vigencia import comprobar
+    resultados = [c.to_dict() for c in comprobar()]
+    return {
+        "comprobaciones": resultados,
+        "todo_ok": all(c["estado"] == "ok" for c in resultados),
+    }
+
+
+@app.get("/subastas/tipo-interes")
+def tipo_interes():
+    """Tipo de referencia oficial en vivo, con su fecha y fuente."""
+    from datos_vivos import tipo_hipotecario_estimado
+    return tipo_hipotecario_estimado()
+
+
 @app.post("/subastas/calculadora")
 def calculadora(datos: CalculadoraIn):
     """Rentabilidad de cualquier operación, venga o no de una subasta.

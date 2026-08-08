@@ -55,7 +55,7 @@ class Supuestos:
     interes_anual: float = 0.032       # Euríbor + diferencial típico
     anios_hipoteca: int = 25
     itp_pct: float | None = None       # si es None se deduce de la provincia
-    notaria_registro_gestoria: float = 2500.0
+    notaria_registro_gestoria: float = 0.0   # 0 = calcular por arancel según precio
     reforma: float = 0.0
     ibi_anual: float = 400.0
     comunidad_mensual: float = 60.0
@@ -68,11 +68,17 @@ class Supuestos:
 
 
 def itp_de_provincia(provincia: str | None) -> float:
-    if not provincia:
-        return ITP_POR_DEFECTO
-    clave = provincia.strip().lower()
-    comunidad = PROVINCIA_A_COMUNIDAD.get(clave, clave)
-    return ITP_POR_COMUNIDAD.get(comunidad, ITP_POR_DEFECTO)
+    """Tipo EFECTIVO de ITP. Delega en `impuestos`, que conoce las escalas por
+    tramos de Cataluña, Baleares y Extremadura y cita la norma de cada tipo.
+
+    Se conserva la firma antigua (un porcentaje) para no romper a quien la use,
+    pero el cálculo bueno es `impuestos.calcular_itp`, que además devuelve la
+    fuente."""
+    from impuestos import regimen_de
+    # Tipo efectivo sobre una base de referencia; en escalas depende del importe,
+    # por eso `analizar` usa el cálculo exacto y no esta función.
+    _, efectivo = regimen_de(provincia).calcular(200_000)
+    return round(efectivo, 4)
 
 
 def cuota_hipoteca(principal: float, interes_anual: float, anios: int) -> float:
@@ -123,9 +129,18 @@ def analizar(precio_compra: float, alquiler_mensual: float, provincia: str | Non
     if precio_compra <= 0:
         raise ValueError("El precio de compra debe ser mayor que cero")
 
-    itp_pct = s.itp_pct if s.itp_pct is not None else itp_de_provincia(provincia)
-    itp = precio_compra * itp_pct
-    gastos_compra = itp + s.notaria_registro_gestoria
+    from impuestos import calcular_itp, gastos_compra as calcular_gastos
+    if s.itp_pct is not None:
+        itp, itp_pct, info_itp = precio_compra * s.itp_pct, s.itp_pct, {"nota": "tipo indicado por el usuario"}
+    else:
+        info_itp = calcular_itp(precio_compra, provincia)
+        itp, itp_pct = info_itp["cuota"], info_itp["tipo_efectivo"]
+
+    # Los aranceles escalan con el precio: un fijo de 2.500 € se quedaba corto
+    # en inmuebles grandes y era caro en los pequeños.
+    info_gastos = calcular_gastos(precio_compra, en_subasta=True)
+    otros = s.notaria_registro_gestoria if s.notaria_registro_gestoria else info_gastos["total"]
+    gastos_compra = itp + otros
     inversion_total = precio_compra + gastos_compra + s.reforma
 
     hipoteca = precio_compra * (1 - s.entrada_pct)
@@ -163,7 +178,7 @@ def analizar(precio_compra: float, alquiler_mensual: float, provincia: str | Non
         precio_compra=round(precio_compra, 2),
         itp_pct=itp_pct,
         itp=round(itp, 2),
-        otros_gastos_compra=round(s.notaria_registro_gestoria, 2),
+        otros_gastos_compra=round(otros, 2),
         reforma=round(s.reforma, 2),
         inversion_total=round(inversion_total, 2),
         capital_aportado=round(capital_aportado, 2),
@@ -185,6 +200,8 @@ def analizar(precio_compra: float, alquiler_mensual: float, provincia: str | Non
             "vacancia_aplicada_pct": s.vacancia_pct,
             "meses_vacio_equivalente": round(s.vacancia_pct * 12, 1),
             "intereses_primer_anio": round(intereses_primer_anio, 2),
+            "itp": info_itp,
+            "gastos_formalizacion": info_gastos,
             "nota_itp": "Tipo general de la comunidad; no se aplican reducciones "
                         "por edad, familia numerosa o VPO porque dependen del comprador.",
         },

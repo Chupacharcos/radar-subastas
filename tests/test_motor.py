@@ -116,6 +116,49 @@ check(len(critica.checklist) > len(limpia.checklist),
 check(any("nota simple" in c["item"].lower() for c in limpia.checklist),
       "la nota simple se pide siempre")
 
+
+print("\n=== 10) Tipos de ITP verificados contra la norma ===")
+from impuestos import calcular_itp, REGIMENES
+
+# Contrastados el 2026-08-08 con las haciendas autonómicas y publicaciones
+# fiscales. Cantabria estaba mal en la primera versión (9% en vez de 10%).
+esperados = {"madrid": 0.06, "navarra": 0.06, "canarias": 0.065, "andalucia": 0.07,
+             "la rioja": 0.07, "aragon": 0.08, "asturias": 0.08, "murcia": 0.08,
+             "castilla y leon": 0.08, "galicia": 0.09, "castilla-la mancha": 0.09,
+             "cantabria": 0.10, "comunidad valenciana": 0.10, "pais vasco": 0.04}
+for comunidad, tipo in esperados.items():
+    r = calcular_itp(100_000, comunidad)
+    check(abs(r["tipo_efectivo"] - tipo) < 0.0001,
+          f"{comunidad}: {r['tipo_efectivo']*100:.2f} % (esperado {tipo*100:.2f} %)")
+
+check(len(REGIMENES) == 17, f"las 17 comunidades cubiertas ({len(REGIMENES)})")
+check(all(r.fuente for r in REGIMENES.values()), "cada tipo cita su norma")
+
+print("\n=== 11) Escalas por tramos (no tipo plano) ===")
+# Cataluña, Decreto Ley 5/2025: 10 % hasta 600k, 11 % hasta 900k, 12 % después.
+bajo = calcular_itp(500_000, "barcelona")
+medio = calcular_itp(800_000, "barcelona")
+alto = calcular_itp(1_200_000, "barcelona")
+check(abs(bajo["tipo_efectivo"] - 0.10) < 0.0001, "Cataluña bajo 600k → 10 %")
+check(0.10 < medio["tipo_efectivo"] < 0.11, f"Cataluña 800k → efectivo {medio['tipo_efectivo']*100:.2f} % (entre 10 y 11)")
+check(alto["tipo_efectivo"] > medio["tipo_efectivo"], "a más precio, más tipo efectivo")
+check(bajo["escalonado"] is True, "Cataluña se marca como escalonada")
+check(calcular_itp(200_000, "madrid")["escalonado"] is False, "Madrid es tipo plano")
+
+print("\n=== 12) Aranceles proporcionales al precio ===")
+from impuestos import gastos_compra
+g1, g2 = gastos_compra(120_000), gastos_compra(800_000)
+check(g2["total"] > g1["total"], "un inmueble caro paga más arancel")
+check(g1["es_estimacion"] is True, "los aranceles se declaran como estimación")
+check("1426/1989" in g1["fuente"], "se cita el RD de aranceles notariales")
+check(gastos_compra(300_000, en_subasta=True)["total"] < gastos_compra(300_000, en_subasta=False)["total"],
+      "en subasta el coste notarial es menor (no hay escritura de compraventa)")
+
+print("\n=== 13) Provincia desconocida no revienta ===")
+r = calcular_itp(150_000, "Terra Media")
+check(r["cuota"] > 0, "una provincia inexistente usa el tipo por defecto")
+check(calcular_itp(150_000, None)["cuota"] > 0, "sin provincia también calcula")
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")
