@@ -159,6 +159,51 @@ r = calcular_itp(150_000, "Terra Media")
 check(r["cuota"] > 0, "una provincia inexistente usa el tipo por defecto")
 check(calcular_itp(150_000, None)["cuota"] > 0, "sin provincia también calcula")
 
+
+print("\n=== 14) Métricas de inversor ===")
+from inversor import analizar_inversor
+from rentabilidad import Supuestos as Sup
+
+m = analizar_inversor(150_000, 900, "madrid", renta_hogar_zona_anual=31_000)
+check(m.dscr > 0, f"DSCR calculado ({m.dscr})")
+check(0 <= m.ocupacion_minima_pct <= 1, "la ocupación mínima es un porcentaje válido")
+check(m.per_inmobiliario > 0, f"PER inmobiliario ({m.per_inmobiliario} años)")
+check(m.estres_tipos["cuota_estresada"] > m.estres_tipos["cuota_actual"],
+      "subir el tipo encarece la cuota")
+check(m.estres_tipos["cash_flow_estresado"] < m.estres_tipos["cash_flow_actual"],
+      "subir el tipo empeora el cash-flow")
+check(m.esfuerzo_inquilino is not None, "calcula el esfuerzo del inquilino si hay renta de zona")
+check(analizar_inversor(150_000, 900, "madrid").esfuerzo_inquilino is None,
+      "sin renta de zona no se inventa el esfuerzo")
+
+# Un alquiler desproporcionado para la zona debe saltar
+caro = analizar_inversor(150_000, 1_500, "madrid", renta_hogar_zona_anual=24_000)
+check(caro.esfuerzo_inquilino["veredicto"] == "inviable",
+      f"esfuerzo del {caro.esfuerzo_inquilino['esfuerzo_pct']*100:.0f} % → inviable")
+check(any("no puede" in l for l in caro.lecturas), "y lo explica en las lecturas")
+
+sin_h = analizar_inversor(150_000, 900, "madrid", s=Sup(entrada_pct=1.0))
+check(sin_h.dscr_veredicto == "sin hipoteca", "sin hipoteca no hay DSCR que evaluar")
+
+print("\n=== 15) Contexto de zona ===")
+from contexto_zona import evaluar_zona
+
+bcn = evaluar_zona("Barcelona", "Barcelona", anio_construccion=1968)
+check(bcn.zona_tensionada is True, "Barcelona se detecta como zona tensionada")
+check(bcn.zona_tensionada_certeza == "confirmada", "y con certeza confirmada")
+check(bcn.ite_situacion == "exigible", "un edificio de 1968 tiene ITE exigible")
+check(any("1980" in f["factor"] for f in bcn.factores), "avisa de la eficiencia energética")
+
+mad = evaluar_zona("Las Rozas de Madrid", "Madrid", anio_construccion=1995)
+check(mad.zona_tensionada is False, "Las Rozas no es zona tensionada")
+check(mad.ite_situacion == "no exigible aún", "un edificio de 1995 aún no pasa ITE")
+
+girona = evaluar_zona("Un Pueblo Cualquiera", "Girona")
+check(girona.zona_tensionada_certeza == "probable",
+      "en provincia con declaraciones se marca como probable, no se afirma")
+
+check(len(bcn.pendientes) >= 3, "declara qué datos faltan en lugar de inventarlos")
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

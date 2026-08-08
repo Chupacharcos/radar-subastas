@@ -25,6 +25,8 @@ from catastro import consultar as consultar_catastro
 from rentabilidad import Supuestos, analizar, precio_maximo_para_cash_flow
 from riesgo import evaluar as evaluar_riesgo
 from valoracion import valorar
+from inversor import analizar_inversor
+from contexto_zona import evaluar_zona
 
 app = FastAPI(
     title="Radar de Subastas",
@@ -130,13 +132,48 @@ def analizar_subasta(datos: AnalisisIn):
             inmueble.get("provincia") or subasta.provincia, supuestos,
         )
 
+    # Contexto del entorno: manda sobre la rentabilidad, porque una zona
+    # tensionada limita por ley el alquiler que se puede cobrar.
+    zona = evaluar_zona(
+        inmueble.get("municipio") or subasta.localidad,
+        inmueble.get("provincia") or subasta.provincia,
+        inmueble.get("anio_construccion"),
+    )
+
+    metricas = None
+    if v.alquiler_mensual_estimado:
+        metricas = analizar_inversor(
+            subasta.valor_subasta, v.alquiler_mensual_estimado,
+            inmueble.get("provincia") or subasta.provincia, supuestos,
+            renta_hogar_zona_anual=zona.renta_hogar_anual,
+        ).to_dict()
+
     return {
         "subasta": subasta.to_dict() | {"url": subasta.url},
         "inmueble": inmueble,
         "valoracion": v.to_dict(),
         "rentabilidad": financiero,
+        "metricas_inversor": metricas,
+        "contexto_zona": zona.to_dict(),
         "riesgo": riesgo.to_dict(),
     }
+
+
+@app.post("/subastas/inversor")
+def metricas_inversor(datos: CalculadoraIn):
+    """Métricas de solvencia sobre una operación: DSCR, punto muerto de
+    ocupación, estrés de tipos, esfuerzo del inquilino y coste de oportunidad."""
+    supuestos = datos.supuestos.a_supuestos() if datos.supuestos else Supuestos()
+    m = analizar_inversor(datos.precio_compra, datos.alquiler_mensual,
+                          datos.provincia, supuestos)
+    return m.to_dict()
+
+
+@app.get("/subastas/zona")
+def zona(municipio: str = Query(...), provincia: str = Query(None),
+         anio_construccion: int = Query(None)):
+    """Contexto del entorno: zona tensionada, ITE y eficiencia energética."""
+    return evaluar_zona(municipio, provincia, anio_construccion).to_dict()
 
 
 @app.get("/subastas/vigencia")
