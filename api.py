@@ -25,6 +25,7 @@ from catastro import consultar as consultar_catastro
 from rentabilidad import Supuestos, analizar, precio_maximo_para_cash_flow
 from riesgo import evaluar as evaluar_riesgo
 from valoracion import valorar
+from zonas import analizar_zonas, ciudades_disponibles
 from inversor import analizar_inversor
 from contexto_zona import evaluar_zona
 from entorno import analizar_entorno, geocodificar
@@ -99,6 +100,27 @@ def buscar(provincia: str = Query("madrid"), limite: int = Query(10, ge=1, le=40
         "subastas": [s.to_dict() | {"url": s.url} for s in subastas],
         "fuente": "Portal de Subastas de la Agencia Estatal BOE",
     }
+
+
+@app.get("/subastas/zonas")
+def zonas(ciudad: str = Query("madrid"), superficie: int = Query(80, ge=25, le=400),
+          alquiler_m2: float = Query(None, description="€/m² al mes, si conoces el real"),
+          entrada_pct: float = Query(0.30, ge=0.0, le=1.0),
+          interes_anual: float = Query(None, ge=0.0, le=0.2),
+          anios: int = Query(25, ge=5, le=40)):
+    """Compara los barrios de una ciudad como inversión: precio, hipoteca,
+    alquiler y lo que queda al mes. Ordenados por rentabilidad neta."""
+    if interes_anual is None:
+        from datos_vivos import tipo_hipotecario_estimado
+        interes_anual = tipo_hipotecario_estimado()["tipo_estimado"]
+    s = Supuestos(entrada_pct=entrada_pct, interes_anual=interes_anual, anios_hipoteca=anios)
+    return analizar_zonas(ciudad, superficie, s, alquiler_m2).to_dict()
+
+
+@app.get("/subastas/ciudades")
+def ciudades():
+    """Ciudades con análisis por barrio disponible."""
+    return {"ciudades": ciudades_disponibles()}
 
 
 @app.get("/subastas/oportunidades")
