@@ -138,6 +138,8 @@ def analizar_subasta(datos: AnalisisIn):
         inmueble.get("municipio") or subasta.localidad,
         inmueble.get("provincia") or subasta.provincia,
         inmueble.get("anio_construccion"),
+        codigo_ine_provincia=inmueble.get("codigo_ine_provincia"),
+        codigo_ine_municipio=inmueble.get("codigo_ine_municipio"),
     )
 
     metricas = None

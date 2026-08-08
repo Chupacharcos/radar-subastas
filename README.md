@@ -224,3 +224,53 @@ La primera versión llevaba tipos escritos de memoria. Al contrastarlos:
 
 Cada tipo cita ahora su norma en `impuestos.py`, y los tests contrastan las 17
 comunidades contra los valores verificados.
+
+## Contexto de zona y métricas de inversor
+
+### El límite legal que invalida cualquier proyección
+
+**Zona tensionada (Ley 12/2023).** Hay más de 300 municipios declarados: 271 en
+Cataluña —Barcelona y todo su área metropolitana—, 14 en País Vasco, 21 en
+Navarra y varios en Galicia. Ahí, la renta de un contrato nuevo **no puede
+superar la del contrato anterior** de los últimos cinco años. Comprar contando
+con subir el alquiler a precio de mercado no es una previsión optimista: es
+ilegal en esas zonas. Ninguna calculadora del sector lo advierte.
+
+Cuando el municipio no está en la lista pero su provincia tiene declaraciones,
+se marca **«probable»** y se pide comprobarlo, en lugar de afirmar que no lo es.
+
+### Renta real del barrio, no supuestos
+
+La renta media del hogar sale del **Atlas de distribución de renta del INE**,
+con dato por municipio y sección censal. Con ella se calcula el **esfuerzo del
+inquilino**: si el alquiler supera el 35 % de lo que entra en los hogares de esa
+zona, el problema no es que el inquilino no quiera pagar, es que no puede — y
+eso predice impago y rotación mejor que ninguna otra variable.
+
+La API JSON del INE rechaza estas tablas por volumen, así que se usa la descarga
+CSV oficial: se baja una vez por provincia, se destila a lo mínimo útil y se
+cachea. Consultar después es instantáneo.
+
+### Métricas de solvencia
+
+| Métrica | Qué responde |
+|---|---|
+| **DSCR** | Cuántas veces cubre el ingreso operativo la cuota. Es lo que mira un banco; por debajo de 1,25 aprieta |
+| **Punto muerto de ocupación** | Cuántos meses aguanta vacío al año antes de entrar en pérdidas |
+| **Estrés de tipos** | Qué pasa si el Euríbor sube 2 puntos. Entre 2021 y 2023 subió más de cuatro |
+| **Esfuerzo del inquilino** | El alquiler frente a la renta real del barrio |
+| **Coste de oportunidad** | La prima frente a deuda pública a 10 años, que no tiene inquilinos ni derramas |
+
+## Sobre la API de Idealista
+
+`idealista.py` está escrito y probado, pero **desactivado**: su acceso se
+concede por solicitud manual y sus condiciones no permiten redistribuir los
+datos a terceros, que es lo que hace un servicio público.
+
+Lo legítimo es que **quien despliegue esto pida su propia clave** y acepte esas
+condiciones. Entonces basta con exportar `IDEALISTA_API_KEY` e
+`IDEALISTA_SECRET` y reiniciar: el análisis empieza a contrastar el valor de
+subasta con precios de oferta reales de la zona, además de con el modelo.
+
+Sin credenciales todo funciona igual, apoyándose en el modelo estadístico y
+declarándolo como estimación.

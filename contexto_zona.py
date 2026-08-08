@@ -86,10 +86,25 @@ def _normaliza(t: str) -> str:
 
 def evaluar_zona(municipio: str | None, provincia: str | None = None,
                  anio_construccion: int | None = None,
-                 renta_hogar_anual: float | None = None) -> ContextoZona:
-    """Contexto del entorno que condiciona la inversión."""
+                 renta_hogar_anual: float | None = None,
+                 codigo_ine_provincia: str | None = None,
+                 codigo_ine_municipio: str | None = None) -> ContextoZona:
+    """Contexto del entorno que condiciona la inversión.
+
+    Si se pasan los códigos INE (los devuelve el Catastro), la renta del hogar
+    se consulta al Atlas del INE y deja de ser una estimación."""
+    # La renta real manda sobre cualquier supuesto.
+    if renta_hogar_anual is None and codigo_ine_provincia:
+        try:
+            from renta_ine import consultar as consultar_renta
+            r = consultar_renta(municipio or "", codigo_ine_provincia, codigo_ine_municipio)
+            if r.renta_hogar_anual:
+                renta_hogar_anual = r.renta_hogar_anual
+        except Exception:
+            pass   # sin renta se sigue: el resto del contexto no depende de ella
+
     ctx = ContextoZona(municipio=municipio, renta_hogar_anual=renta_hogar_anual,
-                       renta_es_estimacion=renta_hogar_anual is None)
+                       renta_es_estimacion=False if renta_hogar_anual else True)
     factores: list[dict] = []
 
     # 1. Zona tensionada — límite legal a los ingresos
@@ -174,7 +189,7 @@ def evaluar_zona(municipio: str | None, provincia: str | None = None,
             "efecto": "informativo",
             "detalle": "Determina qué alquiler puede pagar de verdad quien vive allí.",
             "implicacion": "Un alquiler por encima del 35 % de esa renta genera impagos y rotación.",
-            "fuente": "INE, Atlas de distribución de renta de los hogares",
+            "fuente": "INE, Atlas de distribución de renta de los hogares (dato real)",
         })
 
     ctx.factores = factores

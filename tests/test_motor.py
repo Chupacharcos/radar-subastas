@@ -204,6 +204,31 @@ check(girona.zona_tensionada_certeza == "probable",
 
 check(len(bcn.pendientes) >= 3, "declara qué datos faltan en lugar de inventarlos")
 
+
+print("\n=== 16) Renta del INE (dato real, no estimación) ===")
+from renta_ine import consultar as consultar_renta, TABLA_POR_PROVINCIA
+
+check(len(TABLA_POR_PROVINCIA) >= 50, f"{len(TABLA_POR_PROVINCIA)} provincias mapeadas al Atlas")
+r = consultar_renta("MADRID", "28", "079")
+check(r.renta_hogar_anual and r.renta_hogar_anual > 20_000,
+      f"Madrid: {r.renta_hogar_anual:,.0f} €/hogar ({r.anio})" if r.renta_hogar_anual else "sin dato")
+# El bug que hubo: 'Las Rozas de Madrid' encajaba con 'Madrid' por subcadena.
+lr = consultar_renta("LAS ROZAS DE MADRID", "28", "127")
+check(lr.codigo_ine == "28127", f"Las Rozas se identifica por código ({lr.codigo_ine})")
+check(lr.renta_hogar_anual != r.renta_hogar_anual, "y no se confunde con Madrid capital")
+mal = consultar_renta("Ciudad Inventada", "28")
+check(mal.error is not None, "un municipio inexistente devuelve error, no un número")
+
+print("\n=== 17) Idealista: desactivado sin credenciales ===")
+from idealista import esta_configurado, precios_zona
+res = precios_zona(40.42, -3.70)
+if esta_configurado():
+    check(True, "hay credenciales configuradas")
+else:
+    check(res.disponible is False, "sin credenciales se declara no disponible")
+    check("developers.idealista.com" in res.aviso, "y explica cómo solicitarlas")
+    check(res.precio_medio_m2 is None, "no se inventa un precio")
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")
