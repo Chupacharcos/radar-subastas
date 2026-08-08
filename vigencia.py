@@ -185,6 +185,47 @@ def comprobar() -> list[Comprobacion]:
             "Índices del INE", "caducado", f"No se pudieron comprobar: {type(e).__name__}.",
         ))
 
+    # 7. Alquiler real y precio de compra del ministerio. El del alquiler importa
+    #    más que ninguno: NO está en el catálogo documentado del ministerio, se
+    #    localizó sondeando su CDN. Si un día devuelve un 404, medio proyecto se
+    #    queda sin la única fuente de nivel de alquiler que hay en abierto.
+    try:
+        from alquiler_real import frescura as frescura_alquiler
+        datos = frescura_alquiler()
+        anio_actual = datetime.now(timezone.utc).year
+        if datos.get("error"):
+            resultados.append(Comprobacion(
+                "Alquiler real por municipio (ministerio)", "caducado",
+                f"No se pudo descargar {datos['origen']}: {datos['error']}. Es un "
+                "fichero no catalogado; revisa si ha cambiado de nombre o de ruta.",
+            ))
+        else:
+            retraso = anio_actual - (datos.get("ultimo_anio") or 0)
+            resultados.append(Comprobacion(
+                "Alquiler real por municipio (ministerio)",
+                "ok" if retraso <= 2 else "caducado",
+                f"{datos['municipios']} municipios, último año {datos['ultimo_anio']}."
+                + ("" if retraso <= 2 else " Demasiado atrás: comprueba el fichero."),
+            ))
+    except Exception as e:
+        resultados.append(Comprobacion("Alquiler real por municipio (ministerio)",
+                                       "caducado", f"No se pudo comprobar: {type(e).__name__}."))
+
+    try:
+        from precio_compra import frescura as frescura_precio
+        datos = frescura_precio()
+        if datos.get("error"):
+            resultados.append(Comprobacion("Valor tasado de la vivienda (ministerio)",
+                                           "caducado", f"No se pudo descargar: {datos['error']}."))
+        else:
+            resultados.append(Comprobacion(
+                "Valor tasado de la vivienda (ministerio)", "ok",
+                f"{datos['provincias']} provincias, último trimestre {datos['ultimo_periodo']}.",
+            ))
+    except Exception as e:
+        resultados.append(Comprobacion("Valor tasado de la vivienda (ministerio)",
+                                       "caducado", f"No se pudo comprobar: {type(e).__name__}."))
+
     return resultados
 
 

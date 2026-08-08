@@ -34,9 +34,9 @@ Subasta `SUB-JA-2026-265154`, Las Rozas (Madrid), consultada en agosto de 2026:
 | | |
 |---|---|
 | Sale a | 817.026 € — 2.053 €/m² |
-| Valor de mercado estimado | 1.554.800 € — 3.907 €/m² |
-| **Descuento** | **47,5 %** |
-| Cash-flow estimado | +2.473 €/mes |
+| Valor de referencia | 1.610.905 € — 4.048 €/m² tasados en la provincia (2026T1) |
+| **Descuento** | **49,3 %** |
+| Alquiler del municipio | 996 €/mes de mediana (Las Rozas, 2024) |
 | **Riesgo** | **CRÍTICO (90/100)** |
 
 Ese 47 % parece un chollo. El semáforo explica por qué probablemente no lo es:
@@ -69,12 +69,14 @@ También calcula el **precio máximo** que puedes pagar sin que el cash-flow se
 vuelva negativo. Con 900 €/mes de alquiler en Madrid: 188.289 €. Por encima de
 esa cifra, cada mes pones dinero.
 
-## Endpoints
+## Endpoints (16)
 
 ```
 GET  /subastas/buscar?provincia=madrid&limite=10   Subastas de inmuebles en curso
 POST /subastas/analizar                            Análisis completo de una subasta
 POST /subastas/calculadora                         Rentabilidad de cualquier operación
+GET  /subastas/zonas?provincia=madrid              Municipios comparados como inversión
+GET  /subastas/distritos?ciudad=madrid             Renta y alquiler por distrito censal
 GET  /subastas/alquiler?codigo_municipio=28079     Evolución del alquiler frente al precio
 GET  /subastas/provincias                          Provincias con atajo por nombre
 GET  /health
@@ -96,8 +98,9 @@ curl -X POST http://localhost:8010/subastas/calculadora \
 |---|---|---|
 | [Portal de Subastas del BOE](https://subastas.boe.es) | Subastas judiciales, de Hacienda y de Seguridad Social | Público, sin registro |
 | [Sede Electrónica del Catastro](https://ovc.catastro.meh.es) | Superficie, año y uso del inmueble | API pública, sin clave |
-| `prediccion-precio-inmobiliario` | Valor de mercado (R² 0,90 sobre 21.000 transacciones) | Otro proyecto de este portfolio, MIT |
-| `deteccion-zonas-revalorizacion` | Señal de revalorización por zona. **Sus €/m² por barrio son valores de referencia, no precios de mercado observados**, y así se declaran en cada respuesta | Ídem |
+| [Ministerio de Vivienda](https://cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP001_01.csv) | **Alquiler real por municipio**: mediana, P25 y P75 de los arrendamientos declarados a la Agencia Tributaria | CSV público |
+| [Ministerio de Vivienda](https://cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP006_01.csv) | **Valor tasado de la vivienda libre** en €/m², por provincia y trimestre | CSV público |
+| [Fianzas de alquiler de Cataluña](https://analisi.transparenciacatalunya.cat/resource/qww9-bvhh.json) | Alquiler medio de los **contratos nuevos** por municipio y trimestre | API pública |
 | [INE, Atlas de renta](https://www.ine.es/dynt3/inebase/index.htm?padre=7132) | Renta del hogar por municipio, **distrito y sección censal** | CSV público |
 | [INE, IPVA (op. 432)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736169903) | Evolución del alquiler por municipio y distrito, con los **contratos declarados a Hacienda** | CSV público |
 | [INE, IPV (op. 15)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736152838) | Evolución del precio de compra por comunidad autónoma | CSV público |
@@ -114,14 +117,26 @@ se puja, no se accede a nada tras autenticación y no se descarga masivamente.
 
 Esta distinción es deliberada y se refleja en cada respuesta de la API:
 
-- **Dato**: todo lo que viene del BOE y del Catastro. Valor de subasta,
-  depósito, fechas, situación posesoria, superficie, año, uso.
-- **Estimación**: el valor de mercado (con un error medio del 15,4 %, que la
-  respuesta incluye) y el alquiler, cuando el usuario no aporta el suyo.
+- **Dato**: el BOE y el Catastro (valor de subasta, depósito, fechas, situación
+  posesoria, superficie, año, uso), el alquiler del municipio, el valor tasado de
+  la provincia, la renta del hogar y los índices del INE. Todos llevan su año y
+  su organismo en la respuesta.
+- **Estimación**: sólo el alquiler de los municipios que el ministerio no publica
+  —los pequeños, omitidos por anonimato—, donde se vuelve a una rentabilidad
+  bruta supuesta y el aviso lo dice con esas palabras.
 
 La API devuelve `avisos` con las limitaciones que apliquen a cada caso: si el
-modelo de precios está aproximando una ciudad que no cubre, si el alquiler es
-una estimación por rentabilidad típica, o si el Catastro no respondió.
+€/m² del municipio se está estirando a un inmueble de tamaño muy distinto al
+mediano, si el precio de compra es una media provincial, o si el Catastro no
+respondió.
+
+> **Lo que se quitó, y por qué.** Hasta agosto de 2026 el valor de mercado salía
+> de un modelo entrenado con *idealista18* —anuncios reales, pero de **2018**— y
+> el alquiler se derivaba de él con una «rentabilidad bruta típica» que no
+> procedía de ninguna fuente citable. Además, la comparación de barrios usaba
+> €/m² escritos a mano en otro proyecto del portfolio, y una «señal de
+> revalorización» calculada por un modelo entrenado con datos sintéticos. Nada de
+> eso está ya: un número inventado no mejora por llevar un aviso al lado.
 
 > **El alquiler y SERPAVI.** La fuente ideal sería
 > [SERPAVI](https://serpavi.mivau.gob.es/), el sistema estatal de referencia con
@@ -131,7 +146,45 @@ una estimación por rentabilidad típica, o si el Catastro no respondió.
 > Hasta que la haya, el **nivel** del alquiler se estima con la rentabilidad
 > bruta típica de la provincia y se marca como estimación.
 
-### La mitad del problema del alquiler que sí tiene solución
+### El alquiler real: dónde estaba el dato
+
+La conclusión de la primera versión fue que el nivel del alquiler estaba
+bloqueado. Y la consulta de SERPAVI lo está: reCAPTCHA Enterprise. Pero el
+**agregado municipal del que sale SERPAVI se publica en abierto** en el CDN de
+datos del ministerio, sin protección de ningún tipo:
+
+    cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP001_01.csv
+
+Trae por municipio, año y tipo de vivienda la **mediana**, el **percentil 25** y
+el **percentil 75** del alquiler, la superficie mediana y el recuento de
+viviendas — las mismas variables que describe la metodología oficial de SERPAVI
+sobre los arrendamientos declarados a la Agencia Tributaria (modelos 100 y 109).
+**3.388 municipios.**
+
+Con eso, la rentabilidad deja de ser circular. Antes el alquiler se derivaba del
+precio con un porcentaje fijo y todas las zonas rendían igual; ahora Madrid
+capital sale a 13,16 €/m² al mes y Móstoles a 9,09 €, y esa diferencia está
+medida.
+
+Dos advertencias que el proyecto lleva encima:
+
+- **Ese fichero no está en el catálogo documentado del ministerio.** datos.gob.es
+  publica del VDP002 al VDP007, pero no el VDP001; se localizó sondeando el CDN.
+  Puede cambiar de ruta o desaparecer sin aviso, así que `vigencia.py` lo
+  comprueba en cada pasada y lo marca como caducado si deja de responder.
+- Es el alquiler del **parque ya arrendado**, no el de los contratos que se firman
+  hoy. Para eso está la segunda fuente: el **registro de fianzas de Cataluña**,
+  que publica el alquiler medio de los contratos nuevos por municipio y trimestre.
+  En Barcelona, primer trimestre de 2026: **1.137 € de media sobre 8.156 fianzas
+  depositadas**, frente a los 900 € de mediana del parque. Un 26 % por encima, que
+  es lo que cobraría de verdad quien compre ahora. Donde hay fianzas, mandan.
+
+Que dos organismos distintos —la Agencia Tributaria vía ministerio y el registro
+de fianzas de la Generalitat— den cifras coherentes entre sí, y en la dirección
+esperable, es la mejor comprobación disponible de que ninguna de las dos está mal
+leída.
+
+### La otra mitad: hacia dónde va
 
 El nivel del alquiler no es público, pero **su evolución sí**. El INE publica el
 **IPVA**, un índice construido con los mismos contratos declarados a Hacienda que
@@ -193,7 +246,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 136 comprobaciones
+./venv/bin/python tests/test_motor.py      # 184 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
@@ -210,9 +263,9 @@ verifican que las tablas siguen existiendo con el mismo identificador.
 | Capa | Tecnología |
 |---|---|
 | API | FastAPI + Uvicorn |
-| Fuentes | BOE (HTML público) · Catastro (JSON) · INE (CSV: Atlas de renta, IPVA, IPV) · Banco de España · OpenStreetMap |
+| Fuentes | BOE (HTML) · Catastro (JSON) · Ministerio de Vivienda (CSV: alquiler municipal, valor tasado) · INE (CSV: Atlas de renta, IPVA, IPV) · Fianzas de Cataluña (API) · Banco de España · OpenStreetMap |
 | Cálculo | Sistema francés de amortización, ITP por comunidad |
-| Valoración | Reutiliza los modelos del portfolio vía HTTP |
+| Valoración | Valor tasado oficial × superficie del Catastro. Sin modelo: no hay microdatos de transacciones recientes en abierto |
 
 ## Los datos caducan: cómo se mantiene esto vivo
 
@@ -226,6 +279,8 @@ un error: la calculadora seguiría devolviendo cifras con total aplomo.
 | Tipos de ITP | Con cada ley autonómica | Revisión manual fechada en `impuestos.REVISADO`; `vigencia.py` avisa a los 180 días |
 | Aranceles notariales | Años | Regulados por RD; revisión manual |
 | HTML del portal del BOE | Sin aviso | Cada extracción declara `campos_ausentes`; `vigencia.py` lo comprueba contra el portal real |
+| Fichero de alquiler del ministerio | Una vez al año, y **no está catalogado** | `vigencia.py` lo descarga en cada pasada; si deja de responder lo marca caducado, porque es la única fuente pública del nivel del alquiler |
+| Valor tasado de la vivienda | Cada trimestre | `vigencia.py` comprueba el último trimestre publicado |
 | Índices del INE (renta, IPVA, IPV) | Una vez al año | `vigencia.py` avisa si el último año publicado se queda más de dos ejercicios atrás: sería señal de que la tabla cambió de identificador o de que la operación dejó de publicarse |
 
 ```bash

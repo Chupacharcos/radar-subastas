@@ -1,12 +1,14 @@
 """
 Tests del motor financiero y del evaluador de riesgo.
 
-No tocan la red: el BOE y el Catastro se prueban a mano contra el servicio real
-(ver README), porque un test que dependa de que haya subastas activas en Madrid
-fallaría un lunes cualquiera por motivos ajenos al código.
+El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
+subastas activas en Madrid fallaría un lunes cualquiera por motivos ajenos al
+código. Se verifican contra el servicio real desde `vigencia.py`.
 
-Lo que sí se prueba aquí es lo que puede romperse en silencio y arruinar una
-decisión de compra: las fórmulas y la detección de riesgos.
+Lo que sí se prueba es lo que puede romperse en silencio y arruinar una decisión
+de compra: las fórmulas, la detección de riesgos y la procedencia de cada dato.
+Las comprobaciones sobre fuentes públicas descargan sus ficheros la primera vez,
+y de paso avisan si una tabla cambia de sitio o deja de publicarse.
 """
 import sys
 from pathlib import Path
@@ -354,6 +356,133 @@ check(dist.distrito_de("valencia", "Ruzafa") is None,
       "y una ciudad sin verificar no asigna distritos")
 check(all(c in dist.NOMBRES for m in dist.BARRIO_A_DISTRITO.values() for c in m.values()),
       "todo distrito del mapa de barrios tiene nombre oficial")
+
+
+print("\n=== 22) Alquiler REAL por municipio (ministerio + fianzas) ===")
+from alquiler_real import (alquiler_estimado_de, alquiler_municipio,
+                           municipios_de_provincia)
+
+md = alquiler_municipio("28079")
+check(md.error is None and md.mediana_mensual > 300,
+      f"Madrid: mediana {md.mediana_mensual} €/mes ({md.anio})")
+check(md.p25_mensual < md.mediana_mensual < md.p75_mensual,
+      f"la horquilla ordena bien: {md.p25_mensual} < {md.mediana_mensual} < {md.p75_mensual}")
+check(md.euros_m2_mes and 5 < md.euros_m2_mes < 30,
+      f"el €/m² sale de dividir por la superficie mediana ({md.euros_m2_mes} €/m²)")
+check(md.viviendas and md.viviendas > 10_000,
+      f"trae el tamaño de la muestra ({md.viviendas} viviendas)")
+check(md.municipio == "Madrid", f"y el nombre del municipio ({md.municipio})")
+
+# Los municipios pequeños se omiten por anonimato, y eso debe explicarse.
+# 28001 (La Acebeda, 60 habitantes) no aparece: es el caso que hay que explicar.
+pequeno = alquiler_municipio("28001")
+check(pequeno.error is not None and "anónima" in pequeno.error,
+      "un municipio sin dato explica por qué no lo hay")
+
+# Cataluña añade contratos nuevos; el resto de España no tiene equivalente.
+bcn = alquiler_municipio("08019")
+check(bcn.contratos_nuevos is not None, "Barcelona trae el alquiler de contratos nuevos")
+check(bcn.contratos_nuevos["media_mensual"] > bcn.mediana_mensual,
+      f"que va por encima del parque ya alquilado "
+      f"({bcn.contratos_nuevos['media_mensual']} > {bcn.mediana_mensual})")
+check(bcn.contratos_nuevos["contratos"] > 100,
+      f"con su número de fianzas ({bcn.contratos_nuevos['contratos']})")
+check(md.contratos_nuevos is None, "fuera de Cataluña no se inventa ese dato")
+
+importe, origen = alquiler_estimado_de("28079", 80)
+check(importe and abs(importe - md.euros_m2_mes * 80) < 1,
+      f"escala el €/m² real a la superficie pedida ({importe} €)")
+check(origen["superficie_fuera_de_rango"] is False,
+      "80 m² está dentro del rango representativo de Madrid")
+_, grande = alquiler_estimado_de("28127", 398)
+check(grande["superficie_fuera_de_rango"] is True,
+      "398 m² frente a una mediana de 85 m² se marca como fuera de rango")
+check("techo, no como previsión" in grande["aviso"], "y el aviso dice cómo leerlo")
+
+mun = municipios_de_provincia("28")
+check(len(mun) > 100, f"{len(mun)} municipios de Madrid con alquiler publicado")
+check(mun[0]["viviendas"] >= mun[-1]["viviendas"], "vienen ordenados por tamaño de muestra")
+check(municipios_de_provincia("99") == [], "una provincia inexistente devuelve lista vacía")
+
+
+print("\n=== 23) Precio de compra oficial y actual ===")
+from precio_compra import precio_provincia, valorar_por_superficie
+
+p = precio_provincia("28")
+check(p.error is None and 1000 < p.euros_m2 < 10_000,
+      f"Madrid: {p.euros_m2} €/m² ({p.anio}T{p.trimestre})")
+check(p.anio >= 2025, f"el dato es reciente, no de 2018 ({p.anio})")
+check(p.variacion_anual_pct is not None, "trae la variación del último año")
+check(precio_provincia("99").error is not None, "provincia inexistente da error")
+
+v = valorar_por_superficie("28", 100)
+check(abs(v.valor_referencia - p.euros_m2 * 100) < 1, "valor = €/m² × superficie")
+check(any("PROVINCIAL" in a for a in v.avisos),
+      "avisa de que es una media provincial, no una tasación")
+check(valorar_por_superficie("28", None).error is not None,
+      "sin superficie no se valora en lugar de inventar")
+
+
+print("\n=== 24) Valoración: ni datos de 2018 ni rentabilidades supuestas ===")
+import valoracion as val
+
+subasta = {"valor_subasta": 200_000, "provincia": "madrid"}
+inmueble = {"superficie_m2": 80, "municipio": "Madrid", "provincia": "Madrid",
+            "codigo_ine_provincia": "28", "codigo_ine_municipio": "079"}
+r = val.valorar(subasta, inmueble)
+check(r.valor_mercado_estimado and r.valor_mercado_estimado > 200_000,
+      f"valora con el dato oficial ({r.valor_mercado_estimado:,.0f} €)".replace(",", "."))
+check(r.alquiler_es_estimacion is False,
+      "el alquiler deja de ser una estimación: es el dato del municipio")
+check(r.origen_alquiler["disponible"] is True and r.origen_alquiler["base"],
+      f"y declara de dónde sale ({r.origen_alquiler['base']})")
+check(r.descuento_pct is not None, "calcula el descuento sobre el valor actual")
+check("valor_mercado" in r.fuentes and "Ministerio" in r.fuentes["valor_mercado"],
+      "cita al ministerio como fuente del valor")
+check(not hasattr(r, "senal_revalorizacion"),
+      "ya no publica la señal que venía de un modelo con datos sintéticos")
+
+# Municipio sin alquiler publicado: debe declararlo, no disimularlo.
+sin_dato = val.valorar(subasta, dict(inmueble, codigo_ine_municipio="001"))
+check(sin_dato.alquiler_es_estimacion is True, "sin dato del municipio vuelve al supuesto")
+check(any("SÍ es un supuesto" in a for a in sin_dato.avisos),
+      "y lo dice con todas las letras")
+
+# El alquiler que aporta el usuario manda sobre cualquier fuente.
+propio = val.valorar(subasta, inmueble, alquiler_usuario=1500)
+check(propio.alquiler_mensual_estimado == 1500 and propio.alquiler_es_estimacion is False,
+      "el alquiler real del usuario tiene prioridad")
+
+
+print("\n=== 25) Comparación de municipios (sin un solo dato inventado) ===")
+from zonas import analizar_zonas, codigo_de_provincia, contexto_distritos
+
+check(codigo_de_provincia("Madrid") == "28" and codigo_de_provincia("28") == "28",
+      "la provincia se acepta por nombre y por código")
+check(codigo_de_provincia("vizcaya") == "48", "y por su nombre alternativo")
+check(codigo_de_provincia("Ciudad Inventada") is None, "una provincia falsa no cuela")
+
+z = analizar_zonas("madrid", limite=12)
+check(z.total_municipios > 5, f"{z.total_municipios} municipios comparados")
+check(all(m["alquiler_mensual"] > 0 for m in z.municipios), "todos traen alquiler real")
+check(all(m["alquiler_anio"] >= 2023 for m in z.municipios), "de un año reciente")
+rents = [m["rentabilidad_neta"] for m in z.municipios]
+check(rents == sorted(rents, reverse=True), "vienen ordenados por rentabilidad neta")
+check(len({m["alquiler_m2_mes"] for m in z.municipios}) > 3,
+      "el alquiler varía de verdad entre municipios, que era el problema de fondo")
+check(any("MISMO para todos" in a for a in z.avisos),
+      "avisa de que el precio de compra es provincial")
+check(z.precio_compra_provincial["anio"] >= 2025, "con el precio del trimestre en curso")
+check(analizar_zonas("Provincia Falsa").total_municipios == 0,
+      "una provincia inexistente devuelve vacío con explicación")
+
+d = contexto_distritos("madrid")
+check(d["disponible"] and len(d["distritos"]) == 21, "Madrid trae sus 21 distritos")
+check(all("renta_hogar_anual" in f for f in d["distritos"]), "con la renta de cada uno")
+check("no bajan de municipio" in d["aviso"],
+      "y explica por qué ahí no hay alquiler ni precio")
+check(contexto_distritos("valencia")["disponible"] is False,
+      "una ciudad sin verificar no inventa distritos")
 
 
 print(f"\n{'='*54}")

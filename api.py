@@ -25,7 +25,7 @@ from catastro import consultar as consultar_catastro
 from rentabilidad import Supuestos, analizar, precio_maximo_para_cash_flow
 from riesgo import evaluar as evaluar_riesgo
 from valoracion import valorar
-from zonas import analizar_zonas, ciudades_disponibles
+from zonas import analizar_zonas, contexto_distritos, provincias_disponibles
 from inversor import analizar_inversor
 from contexto_zona import evaluar_zona
 from entorno import analizar_entorno, geocodificar
@@ -103,24 +103,36 @@ def buscar(provincia: str = Query("madrid"), limite: int = Query(10, ge=1, le=40
 
 
 @app.get("/subastas/zonas")
-def zonas(ciudad: str = Query("madrid"), superficie: int = Query(80, ge=25, le=400),
-          alquiler_m2: float = Query(None, description="€/m² al mes, si conoces el real"),
+def zonas(provincia: str = Query("madrid", description="Nombre o código INE de dos dígitos"),
+          superficie: int = Query(80, ge=25, le=400),
           entrada_pct: float = Query(0.30, ge=0.0, le=1.0),
           interes_anual: float = Query(None, ge=0.0, le=0.2),
-          anios: int = Query(25, ge=5, le=40)):
-    """Compara los barrios de una ciudad como inversión: precio, hipoteca,
-    alquiler y lo que queda al mes. Ordenados por rentabilidad neta."""
+          anios: int = Query(25, ge=5, le=40),
+          limite: int = Query(40, ge=5, le=100)):
+    """Compara los municipios de una provincia como inversión de alquiler.
+
+    Con el alquiler real de cada municipio —el declarado a la Agencia
+    Tributaria—, la renta del hogar del INE y el valor tasado oficial. Nada
+    estimado: cada cifra dice de qué organismo y de qué año viene."""
     if interes_anual is None:
         from datos_vivos import tipo_hipotecario_estimado
         interes_anual = tipo_hipotecario_estimado()["tipo_estimado"]
     s = Supuestos(entrada_pct=entrada_pct, interes_anual=interes_anual, anios_hipoteca=anios)
-    return analizar_zonas(ciudad, superficie, s, alquiler_m2).to_dict()
+    return analizar_zonas(provincia, superficie, s, limite).to_dict()
+
+
+@app.get("/subastas/distritos")
+def distritos(ciudad: str = Query("madrid")):
+    """Renta del hogar y evolución del alquiler por distrito censal.
+
+    Sólo esas dos cosas: son las únicas que el INE publica a ese grano."""
+    return contexto_distritos(ciudad)
 
 
 @app.get("/subastas/ciudades")
 def ciudades():
-    """Ciudades con análisis por barrio disponible."""
-    return {"ciudades": ciudades_disponibles()}
+    """Provincias con comparación de municipios disponible."""
+    return {"provincias": provincias_disponibles()}
 
 
 @app.get("/subastas/oportunidades")
