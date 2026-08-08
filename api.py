@@ -35,8 +35,6 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-PREFIX = "/subastas"
-
 
 class SupuestosIn(BaseModel):
     entrada_pct: float = Field(0.30, ge=0.0, le=1.0)
@@ -70,18 +68,18 @@ def health():
     return {"status": "ok", "service": "subastas-radar", "version": "1.0.0"}
 
 
-@app.get(f"{PREFIX}/health")
+@app.get("/subastas/health")
 def health_prefijo():
     return health()
 
 
-@app.get(f"{PREFIX}/provincias")
+@app.get("/subastas/provincias")
 def provincias():
     """Provincias con atajo por nombre; el resto se consulta por código INE."""
     return {"provincias": sorted(PROVINCIAS), "nota": "También admite el código INE de dos dígitos."}
 
 
-@app.get(f"{PREFIX}/buscar")
+@app.get("/subastas/buscar")
 def buscar(provincia: str = Query("madrid"), limite: int = Query(10, ge=1, le=40)):
     """Subastas de inmuebles en curso, con sus datos económicos y del bien."""
     try:
@@ -100,7 +98,7 @@ def buscar(provincia: str = Query("madrid"), limite: int = Query(10, ge=1, le=40
     }
 
 
-@app.post(f"{PREFIX}/analizar")
+@app.post("/subastas/analizar")
 def analizar_subasta(datos: AnalisisIn):
     """Análisis completo de una subasta: qué es, cuánto vale, qué renta y qué riesgo tiene."""
     try:
@@ -141,7 +139,7 @@ def analizar_subasta(datos: AnalisisIn):
     }
 
 
-@app.post(f"{PREFIX}/calculadora")
+@app.post("/subastas/calculadora")
 def calculadora(datos: CalculadoraIn):
     """Rentabilidad de cualquier operación, venga o no de una subasta.
 
