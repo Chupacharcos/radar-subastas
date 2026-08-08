@@ -101,6 +101,107 @@ def buscar(provincia: str = Query("madrid"), limite: int = Query(10, ge=1, le=40
     }
 
 
+@app.get("/subastas/oportunidades")
+def oportunidades(provincia: str = Query("madrid"), limite: int = Query(12, ge=1, le=30),
+                  precio_max: float = Query(None, description="Descarta lo que no puedas pagar"),
+                  entrada_max: float = Query(None, description="Capital del que dispones"),
+                  riesgo_max: int = Query(None, ge=0, le=100),
+                  solo_analizables: bool = Query(True)):
+    """Subastas ya valoradas y ordenadas por oportunidad.
+
+    El listado crudo obliga a entrar una por una para saber si algo interesa, y
+    muchas no se pueden analizar siquiera (sin referencia catastral no hay
+    superficie, y sin superficie no hay precio por m²). Aquí llegan ya con su
+    riesgo, su precio por m² y el capital que harían falta, ordenadas para que lo
+    interesante esté arriba.
+    """
+    try:
+        with BoeClient() as cliente:
+            subastas = cliente.buscar_con_detalle(provincia, limite)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"El portal del BOE no respondió: {e}")
+
+    from impuestos import calcular_itp, gastos_compra
+
+    resultados = []
+    for s in subastas:
+        d = s.to_dict() | {"url": s.url}
+        d["analizable"] = bool(s.referencia_catastral and s.valor_subasta)
+        d["motivo_no_analizable"] = None
+        if not s.valor_subasta:
+            d["motivo_no_analizable"] = "la subasta no publica valor de salida"
+        elif not s.referencia_catastral:
+            d["motivo_no_analizable"] = ("sin referencia catastral no se puede saber "
+                                         "la superficie ni el precio por m²")
+
+        riesgo = evaluar_riesgo(s.to_dict(), None)
+        d["riesgo_nivel"] = riesgo.nivel
+        d["riesgo_puntuacion"] = riesgo.puntuacion
+        d["riesgos_clave"] = [r["titulo"] for r in riesgo.riesgos[:3]]
+
+        # Superficie del Catastro sólo si la hay: es lo que permite el €/m².
+        d["superficie_m2"] = None
+        d["precio_m2"] = None
+        if s.referencia_catastral:
+            inm = consultar_catastro(s.referencia_catastral)
+            if inm.superficie_m2:
+                d["superficie_m2"] = inm.superficie_m2
+                d["anio_construccion"] = inm.anio_construccion
+                if s.valor_subasta:
+                    d["precio_m2"] = round(s.valor_subasta / inm.superficie_m2, 2)
+
+        # Capital necesario: es el filtro que de verdad usa un inversor.
+        if s.valor_subasta:
+            itp = calcular_itp(s.valor_subasta, s.provincia)["cuota"]
+            gastos = gastos_compra(s.valor_subasta)["total"]
+            d["capital_necesario_estimado"] = round(s.valor_subasta * 0.30 + itp + gastos, 2)
+        else:
+            d["capital_necesario_estimado"] = None
+
+        # Días hasta el cierre: en subastas la urgencia es parte de la decisión.
+        d["dias_para_cierre"] = None
+        if s.fecha_fin:
+            from datetime import datetime, timezone
+            try:
+                fin = datetime.fromisoformat(s.fecha_fin)
+                ahora = datetime.now(fin.tzinfo or timezone.utc)
+                d["dias_para_cierre"] = max(0, (fin - ahora).days)
+            except ValueError:
+                pass
+
+        resultados.append(d)
+
+    if solo_analizables:
+        resultados = [r for r in resultados if r["analizable"]]
+    if precio_max:
+        resultados = [r for r in resultados if (r["valor_subasta"] or 0) <= precio_max]
+    if entrada_max:
+        resultados = [r for r in resultados
+                      if (r["capital_necesario_estimado"] or 0) <= entrada_max]
+    if riesgo_max is not None:
+        resultados = [r for r in resultados if r["riesgo_puntuacion"] <= riesgo_max]
+
+    # Orden: primero lo barato por m² y con menos riesgo. Sin €/m² va al final,
+    # porque no se puede comparar.
+    def clave(r):
+        sin_dato = r["precio_m2"] is None
+        return (sin_dato, r["riesgo_puntuacion"], r["precio_m2"] or 0)
+
+    resultados.sort(key=clave)
+
+    return {
+        "provincia": provincia,
+        "total": len(resultados),
+        "filtros": {"precio_max": precio_max, "entrada_max": entrada_max,
+                    "riesgo_max": riesgo_max, "solo_analizables": solo_analizables},
+        "oportunidades": resultados,
+        "orden": "menor riesgo y menor precio por m² primero",
+        "fuente": "Portal de Subastas del BOE + Catastro",
+    }
+
+
 @app.post("/subastas/analizar")
 def analizar_subasta(datos: AnalisisIn):
     """Análisis completo de una subasta: qué es, cuánto vale, qué renta y qué riesgo tiene."""
