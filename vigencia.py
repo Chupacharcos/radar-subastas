@@ -22,7 +22,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 
 import impuestos
-from datos_vivos import tipo_bce
+from datos_vivos import euribor_12m
 
 # Un tipo autonómico sin revisar en más de seis meses es sospechoso: las leyes
 # de acompañamiento a los presupuestos suelen tocarlos cada ejercicio.
@@ -69,24 +69,24 @@ def comprobar() -> list[Comprobacion]:
         detalle = f"Revisados hace {dias} días (último repaso: {impuestos.REVISADO})."
     resultados.append(Comprobacion("Tipos de ITP por comunidad", estado, detalle, dias))
 
-    # 2. Tipo de referencia del BCE: que la descarga siga viva.
-    t = tipo_bce()
+    # 2. Euríbor a 12 meses: la referencia real de las hipotecas españolas.
+    t = euribor_12m()
     dias_tipo = _dias_desde(t.fecha_dato) if t.fecha_dato != "desconocida" else None
     if t.es_estimacion:
         resultados.append(Comprobacion(
-            "Tipo de interés de referencia", "caducado",
-            "No se pudo descargar del Banco de España y se está usando un valor de reserva.",
+            "Euríbor a 12 meses", "caducado",
+            "No se pudo descargar del Banco de España y se está usando el tipo del BCE.",
         ))
     elif dias_tipo is not None and dias_tipo > MAX_DIAS_TIPO:
         resultados.append(Comprobacion(
-            "Tipo de interés de referencia", "revisar",
+            "Euríbor a 12 meses", "revisar",
             f"El último dato del Banco de España es del {t.fecha_dato} "
             f"({dias_tipo} días). Puede que la serie haya cambiado de formato.",
             dias_tipo,
         ))
     else:
         resultados.append(Comprobacion(
-            "Tipo de interés de referencia", "ok",
+            "Euríbor a 12 meses", "ok",
             f"{t.valor*100:.2f} % con fecha {t.fecha_dato}, del Banco de España.",
             dias_tipo,
         ))

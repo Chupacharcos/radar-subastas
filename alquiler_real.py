@@ -43,6 +43,7 @@ import csv
 import io
 import json
 from dataclasses import dataclass, asdict, field
+from statistics import median
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -367,6 +368,7 @@ def alquiler_estimado_de(codigo_ine: str, superficie_m2: float,
 
     return round(base_m2 * superficie_m2, 0), {
         "disponible": True,
+        "ambito": "municipio",
         "euros_m2_mes": round(base_m2, 2),
         "base": base,
         "anio": real.anio,
@@ -413,6 +415,33 @@ def municipios_de_provincia(codigo_provincia: str) -> list[dict]:
         })
     out.sort(key=lambda m: -(m["viviendas"] or 0))
     return out
+
+
+def mediana_provincial(codigo_provincia: str) -> dict | None:
+    """€/m² al mes mediano de los municipios publicados de una provincia.
+
+    Es el recurso para los municipios que el ministerio no desglosa —más de la
+    mitad de los de España, todos pequeños—. No es un supuesto: es la mediana de
+    municipios medidos de esa misma provincia, y se declara como tal, con cuántos
+    municipios la componen y entre qué valores se mueven.
+
+    Se usa la mediana sin ponderar a propósito. Ponderar por número de viviendas
+    arrastraría el resultado hacia la capital, y quien consulta un municipio sin
+    dato publicado está casi siempre en uno pequeño, que se parece más a los otros
+    pequeños que a la capital.
+    """
+    municipios = municipios_de_provincia(codigo_provincia)
+    valores = sorted(m["euros_m2_mes"] for m in municipios if m.get("euros_m2_mes"))
+    if len(valores) < 3:
+        return None
+    return {
+        "euros_m2_mes": round(median(valores), 2),
+        "municipios": len(valores),
+        "minimo": valores[0],
+        "maximo": valores[-1],
+        "anio": max(m["anio"] for m in municipios),
+        "fuente": FUENTE_MIVAU,
+    }
 
 
 def frescura() -> dict:

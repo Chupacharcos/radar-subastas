@@ -157,6 +157,13 @@ def _num(valor: str) -> float | None:
         return None
 
 
+# El fichero no trae Navarra ni Asturias como provincia, sólo como comunidad
+# autónoma. Al ser uniprovinciales, la comunidad ES la provincia —mismo
+# territorio, mismo dato—, así que se toman de ahí en lugar de dejarlas sin
+# precio. Sin esto, la comparación de municipios devolvía cero en esas dos.
+CCAA_UNIPROVINCIAL = {"03": "33", "15": "31"}   # Asturias, Navarra
+
+
 def _destila(contenido: str) -> dict:
     """CSV → {codigo_provincia: {nombre, serie: {'2026-1': 4047.5, …}}}."""
     out: dict[str, dict] = {}
@@ -166,13 +173,24 @@ def _destila(contenido: str) -> dict:
         valor = _num(fila.get("Valor") or "")
         if valor is None:
             continue
-        cp = (fila.get("CPRO") or "").strip().zfill(2)
+        cp = (fila.get("CPRO") or "").strip()
+        nombre = (fila.get("Provincia") or "").strip()
+        if not cp:
+            # Fila de comunidad autónoma: sólo interesa si es uniprovincial.
+            cp = CCAA_UNIPROVINCIAL.get((fila.get("CODAUTO") or "").strip().zfill(2))
+            if not cp:
+                continue
+            nombre = (fila.get("Comunidad_Autónoma") or "").strip()
+        # El fichero trae una fila agregada de «Ceuta y Melilla» con CPRO="null".
+        # Sin este filtro se colaba como si fuera una provincia más.
+        if not cp.isdigit():
+            continue
+        cp = cp.zfill(2)
         try:
             anio, trimestre = int(fila["Año"]), int(fila["Trimestre"])
         except (KeyError, ValueError):
             continue
-        reg = out.setdefault(cp, {"nombre": (fila.get("Provincia") or "").strip(),
-                                  "serie": {}})
+        reg = out.setdefault(cp, {"nombre": nombre, "serie": {}})
         reg["serie"][f"{anio}-{trimestre}"] = valor
     return out
 

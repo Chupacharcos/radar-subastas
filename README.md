@@ -78,6 +78,8 @@ POST /subastas/calculadora                         Rentabilidad de cualquier ope
 GET  /subastas/zonas?provincia=madrid              Municipios comparados como inversión
 GET  /subastas/distritos?ciudad=madrid             Renta y alquiler por distrito censal
 GET  /subastas/alquiler?codigo_municipio=28079     Evolución del alquiler frente al precio
+GET  /subastas/tipo-interes?diferencial=0.008      Euríbor 12M en vivo + diferencial
+GET  /subastas/vigencia                            Frescura de todas las fuentes
 GET  /subastas/provincias                          Provincias con atajo por nombre
 GET  /health
 ```
@@ -122,14 +124,25 @@ Esta distinción es deliberada y se refleja en cada respuesta de la API:
   posesoria, superficie, año, uso), el alquiler del municipio, el valor tasado de
   la provincia, la renta del hogar y los índices del INE. Todos llevan su año y
   su organismo en la respuesta.
-- **Estimación**: sólo el alquiler de los municipios que el ministerio no publica
-  —los pequeños, omitidos por anonimato—, donde se vuelve a una rentabilidad
-  bruta supuesta y el aviso lo dice con esas palabras.
+- **Medido pero de ámbito más ancho**: cuando el ministerio no publica el
+  alquiler de un municipio —omite los pequeños porque con pocos contratos la
+  mediana dejaría de ser anónima— se usa la mediana de los municipios de su
+  provincia que sí lo publican. Sigue siendo una medición, y la respuesta dice
+  `ambito: "provincia"` y con cuántos municipios se ha construido. Lo mismo con
+  el precio de compra: municipal si existe, provincial si no, con
+  `precio_es_municipal` en cada fila.
+- **Lo único que no se mide** es el diferencial que el banco suma al Euríbor: no
+  hay fuente oficial abierta del diferencial medio del mercado. Por eso no es una
+  constante escondida sino un parámetro (`diferencial`) con un valor por defecto
+  declarado, y el aviso lo señala en cada respuesta.
+
+Los supuestos financieros del usuario —entrada, plazo, vacancia, IRPF, IBI— son
+entradas del cálculo, no datos: vienen con valores por defecto y se cambian en
+cada petición.
 
 La API devuelve `avisos` con las limitaciones que apliquen a cada caso: si el
 €/m² del municipio se está estirando a un inmueble de tamaño muy distinto al
-mediano, si el precio de compra es una media provincial, o si el Catastro no
-respondió.
+mediano, si el alquiler es de ámbito provincial, o si el Catastro no respondió.
 
 > **Lo que se quitó, y por qué.** Hasta agosto de 2026 el valor de mercado salía
 > de un modelo entrenado con *idealista18* —anuncios reales, pero de **2018**— y
@@ -275,7 +288,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 205 comprobaciones
+./venv/bin/python tests/test_motor.py      # 235 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
@@ -292,7 +305,7 @@ verifican que las tablas siguen existiendo con el mismo identificador.
 | Capa | Tecnología |
 |---|---|
 | API | FastAPI + Uvicorn |
-| Fuentes | BOE (HTML) · Catastro (JSON) · Ministerio de Vivienda (CSV: alquiler municipal, valor tasado) · INE (CSV: Atlas de renta, IPVA, IPV) · Fianzas de Cataluña (API) · Banco de España · OpenStreetMap |
+| Fuentes | BOE (HTML) · Catastro (JSON) · Ministerio de Vivienda (CSV y XLS: alquiler municipal, valor tasado provincial y municipal) · INE (CSV: Atlas de renta, IPVA, IPV) · Fianzas de Cataluña (API) · Banco de España (Euríbor 12M) · OpenStreetMap |
 | Cálculo | Sistema francés de amortización, ITP por comunidad |
 | Valoración | Valor tasado oficial del municipio × superficie del Catastro. Sin modelo: no hay microdatos de transacciones recientes en abierto |
 
@@ -304,7 +317,7 @@ un error: la calculadora seguiría devolviendo cifras con total aplomo.
 
 | Dato | Cada cuánto cambia | Cómo se mantiene |
 |---|---|---|
-| Tipo de referencia del BCE | Semanas | Se descarga del Banco de España (serie `ti_1_1`) y se cachea 7 días, declarando siempre la fecha del dato |
+| Euríbor a 12 meses | Diario | Se descarga del Banco de España (serie `ti_1_7.7`) y se cachea 7 días, declarando siempre la fecha del dato. Es el índice al que se revisan las hipotecas; el tipo del BCE queda de reserva |
 | Tipos de ITP | Con cada ley autonómica | Revisión manual fechada en `impuestos.REVISADO`; `vigencia.py` avisa a los 180 días |
 | Aranceles notariales | Años | Regulados por RD; revisión manual |
 | HTML del portal del BOE | Sin aviso | Cada extracción declara `campos_ausentes`; `vigencia.py` lo comprueba contra el portal real |

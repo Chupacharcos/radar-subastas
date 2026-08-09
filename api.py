@@ -108,15 +108,17 @@ def zonas(provincia: str = Query("madrid", description="Nombre o código INE de 
           entrada_pct: float = Query(0.30, ge=0.0, le=1.0),
           interes_anual: float = Query(None, ge=0.0, le=0.2),
           anios: int = Query(25, ge=5, le=40),
+          diferencial: float = Query(None, ge=0.0, le=0.05,
+                                     description="Diferencial sobre el Euríbor; por defecto 0,008"),
           limite: int = Query(40, ge=5, le=100)):
     """Compara los municipios de una provincia como inversión de alquiler.
 
     Con el alquiler real de cada municipio —el declarado a la Agencia
-    Tributaria—, la renta del hogar del INE y el valor tasado oficial. Nada
-    estimado: cada cifra dice de qué organismo y de qué año viene."""
+    Tributaria—, la renta del hogar del INE y el valor tasado oficial. Cada
+    cifra dice de qué organismo, de qué año y de qué ámbito viene."""
     if interes_anual is None:
         from datos_vivos import tipo_hipotecario_estimado
-        interes_anual = tipo_hipotecario_estimado()["tipo_estimado"]
+        interes_anual = tipo_hipotecario_estimado(diferencial)["tipo_estimado"]
     s = Supuestos(entrada_pct=entrada_pct, interes_anual=interes_anual, anios_hipoteca=anios)
     return analizar_zonas(provincia, superficie, s, limite).to_dict()
 
@@ -258,13 +260,13 @@ def analizar_subasta(datos: AnalisisIn):
 
     supuestos = datos.supuestos.a_supuestos() if datos.supuestos else Supuestos()
     financiero = None
-    if v.alquiler_mensual_estimado:
+    if v.alquiler_mensual:
         financiero = analizar(
-            subasta.valor_subasta, v.alquiler_mensual_estimado,
+            subasta.valor_subasta, v.alquiler_mensual,
             inmueble.get("provincia") or subasta.provincia, supuestos,
         ).to_dict()
         financiero["precio_maximo_cash_flow_cero"] = precio_maximo_para_cash_flow(
-            v.alquiler_mensual_estimado, 0.0,
+            v.alquiler_mensual, 0.0,
             inmueble.get("provincia") or subasta.provincia, supuestos,
         )
 
@@ -279,9 +281,9 @@ def analizar_subasta(datos: AnalisisIn):
     )
 
     metricas = None
-    if v.alquiler_mensual_estimado:
+    if v.alquiler_mensual:
         metricas = analizar_inversor(
-            subasta.valor_subasta, v.alquiler_mensual_estimado,
+            subasta.valor_subasta, v.alquiler_mensual,
             inmueble.get("provincia") or subasta.provincia, supuestos,
             renta_hogar_zona_anual=zona.renta_hogar_anual,
         ).to_dict()
@@ -364,10 +366,14 @@ def vigencia():
 
 
 @app.get("/subastas/tipo-interes")
-def tipo_interes():
-    """Tipo de referencia oficial en vivo, con su fecha y fuente."""
+def tipo_interes(diferencial: float = Query(None, ge=0.0, le=0.05,
+                                            description="Diferencial del banco sobre el Euríbor")):
+    """Tipo hipotecario: Euríbor a 12 meses en vivo más el diferencial del banco.
+
+    El Euríbor sale del Banco de España con su fecha. El diferencial es lo único
+    que no se mide, y por eso es un parámetro."""
     from datos_vivos import tipo_hipotecario_estimado
-    return tipo_hipotecario_estimado()
+    return tipo_hipotecario_estimado(diferencial)
 
 
 @app.post("/subastas/calculadora")

@@ -465,8 +465,8 @@ inmueble = {"superficie_m2": 80, "municipio": "Madrid", "provincia": "Madrid",
 r = val.valorar(subasta, inmueble)
 check(r.valor_mercado_estimado and r.valor_mercado_estimado > 200_000,
       f"valora con el dato oficial ({r.valor_mercado_estimado:,.0f} €)".replace(",", "."))
-check(r.alquiler_es_estimacion is False,
-      "el alquiler deja de ser una estimación: es el dato del municipio")
+check(r.alquiler_ambito == "municipio",
+      "el alquiler es el medido del municipio, no una estimación")
 check(r.origen_alquiler["disponible"] is True and r.origen_alquiler["base"],
       f"y declara de dónde sale ({r.origen_alquiler['base']})")
 check(r.descuento_pct is not None, "calcula el descuento sobre el valor actual")
@@ -477,13 +477,23 @@ check(not hasattr(r, "senal_revalorizacion"),
 
 # Municipio sin alquiler publicado: debe declararlo, no disimularlo.
 sin_dato = val.valorar(subasta, dict(inmueble, codigo_ine_municipio="001"))
-check(sin_dato.alquiler_es_estimacion is True, "sin dato del municipio vuelve al supuesto")
-check(any("SÍ es un supuesto" in a for a in sin_dato.avisos),
-      "y lo dice con todas las letras")
+check(sin_dato.alquiler_ambito == "provincia",
+      "sin dato del municipio se usa la mediana provincial, no un supuesto")
+check(sin_dato.origen_alquiler["municipios_en_la_mediana"] > 10,
+      f"compuesta por municipios medidos ({sin_dato.origen_alquiler['municipios_en_la_mediana']})")
+check(any("MEDIANA de los" in a for a in sin_dato.avisos),
+      "y el aviso dice exactamente qué se ha usado")
+check(sin_dato.alquiler_mensual and sin_dato.alquiler_mensual > 0,
+      "sigue habiendo rentabilidad calculable")
+
+# Ya no queda ningún porcentaje inventado en el camino del alquiler.
+import inspect
+check("YIELD" not in inspect.getsource(val),
+      "no queda ninguna rentabilidad supuesta en el módulo de valoración")
 
 # El alquiler que aporta el usuario manda sobre cualquier fuente.
 propio = val.valorar(subasta, inmueble, alquiler_usuario=1500)
-check(propio.alquiler_mensual_estimado == 1500 and propio.alquiler_es_estimacion is False,
+check(propio.alquiler_mensual == 1500 and propio.alquiler_ambito == "inmueble",
       "el alquiler real del usuario tiene prioridad")
 
 
@@ -520,11 +530,11 @@ check("no bajan de municipio" in d["aviso"],
       "y explica por qué ahí no hay alquiler ni precio")
 check(contexto_distritos("zaragoza")["disponible"] is False,
       "Zaragoza no inventa distritos: su numeración no supera el contraste")
-val = contexto_distritos("valencia")
-check(val["disponible"] and len(val["distritos"]) == 19,
-      f"Valencia trae sus 19 distritos ({len(val.get('distritos', []))})")
-check(val["distritos"][0]["nombre"] == "El Pla del Real",
-      f"y el de mayor renta es El Pla del Real ({val['distritos'][0]['nombre']})")
+dist_val = contexto_distritos("valencia")
+check(dist_val["disponible"] and len(dist_val["distritos"]) == 19,
+      f"Valencia trae sus 19 distritos ({len(dist_val.get('distritos', []))})")
+check(dist_val["distritos"][0]["nombre"] == "El Pla del Real",
+      f"y el de mayor renta es El Pla del Real ({dist_val['distritos'][0]['nombre']})")
 sev = contexto_distritos("sevilla")
 check(sev["distritos"][0]["nombre"] == "Los Remedios",
       f"en Sevilla, Los Remedios ({sev['distritos'][0]['nombre']})")
@@ -563,6 +573,88 @@ for _cp in ("08", "28", "29", "41", "46", "50"):
         check(_real == _cp, f"la tabla de la provincia {_cp} contiene la provincia {_real}")
     except Exception as e:
         check(False, f"no se pudo comprobar la provincia {_cp}: {type(e).__name__}")
+
+
+print("\n=== 27) El tipo hipotecario parte del Euríbor real ===")
+from datos_vivos import (DIFERENCIAL_POR_DEFECTO, euribor_12m, tipo_bce,
+                         tipo_hipotecario_estimado)
+
+eur = euribor_12m()
+check(eur.error is None if hasattr(eur, "error") else True, "el Euríbor se descarga")
+check(0 < eur.valor < 0.15, f"valor plausible: {eur.valor*100:.3f} %")
+check("Euríbor" in eur.fuente, f"y cita su serie ({eur.fuente})")
+check(eur.es_estimacion is False, "es un dato, no una estimación")
+
+# Antes se usaba el tipo de intervención del BCE, que es otra cosa: mide lo que
+# cuesta el dinero al banco, no el índice al que se revisan las hipotecas.
+bce = tipo_bce()
+check(eur.valor != bce.valor,
+      f"Euríbor ({eur.valor*100:.2f} %) y BCE ({bce.valor*100:.2f} %) no son lo mismo")
+
+t = tipo_hipotecario_estimado()
+check(abs(t["tipo_estimado"] - (eur.valor + DIFERENCIAL_POR_DEFECTO)) < 1e-9,
+      "el tipo es Euríbor más diferencial, sin más pasos")
+check(t["diferencial_es_por_defecto"] is True, "y avisa de que el diferencial es el de serie")
+propio = tipo_hipotecario_estimado(diferencial=0.005)
+check(propio["diferencial"] == 0.005 and propio["diferencial_es_por_defecto"] is False,
+      "quien tiene una oferta concreta puede pasar la suya")
+check("no se mide" in t["aviso"],
+      "el aviso dice exactamente qué parte no está medida")
+
+
+print("\n=== 28) No queda ningún dato inventado en la cadena principal ===")
+import alquiler_real as _ar, precio_compra as _pc, renta_ine as _ri
+import valoracion as valoracion_mod
+
+# El recorrido completo de una subasta real, comprobando que cada cifra sale de
+# una fuente con año y organismo. Es el test que resume el proyecto.
+_inm = {"superficie_m2": 90.0, "municipio": "Getafe", "provincia": "Madrid",
+        "codigo_ine_provincia": "28", "codigo_ine_municipio": "065",
+        "anio_construccion": 1985}
+_v = valoracion_mod.valorar({"valor_subasta": 180_000, "provincia": "madrid"}, _inm)
+
+check(_v.origen_valor and _v.origen_valor["ambito"] == "municipio",
+      "el valor sale del municipio, no de una media provincial")
+check("Ministerio" in _v.origen_valor["fuente"], "citando al ministerio")
+check(_v.origen_alquiler["ambito"] in ("municipio", "provincia"),
+      "el alquiler declara su ámbito")
+check(_v.origen_alquiler.get("anio", 0) >= 2023, "y su año")
+check(all(f for f in _v.fuentes.values()), "todas las fuentes tienen texto")
+
+# Cada fuente responde de verdad y con datos plausibles.
+check(_ar.alquiler_municipio("28065").mediana_mensual > 200, "alquiler real de Getafe")
+check(_pc.precio_municipio("28065").euros_m2 > 500, "precio de compra de Getafe")
+check(_ri.consultar("Getafe", "28", "065").renta_hogar_anual > 10_000, "renta de Getafe")
+
+
+print("\n=== 29) Cobertura: las 52 provincias, no sólo las que se miran ===")
+from zonas import PROVINCIAS as _PROV, analizar_zonas as _az
+
+_sin_precio, _sin_alquiler = [], []
+for _cp, _nom in _PROV.items():
+    if not _ar.municipios_de_provincia(_cp):
+        _sin_alquiler.append(_nom)
+    _pp = _pc.precio_provincia(_cp)
+    if _pp.error or not _pp.euros_m2:
+        _sin_precio.append(_nom)
+
+check(not _sin_alquiler, f"todas tienen alquiler publicado ({_sin_alquiler})")
+# Navarra y Asturias no vienen como provincia en el fichero, sólo como comunidad;
+# al ser uniprovinciales es el mismo territorio y se toman de ahí. Sin eso, la
+# comparación devolvía cero municipios en las dos y nadie lo habría notado.
+check(not _sin_precio, f"todas tienen precio de compra ({_sin_precio})")
+check(_pc.precio_provincia("31").euros_m2 > 500, "Navarra sale de su fila de comunidad")
+check(_pc.precio_provincia("33").euros_m2 > 500, "Asturias también")
+# El fichero trae una fila agregada «Ceuta y Melilla» con CPRO="null" que se
+# colaba como una provincia más.
+check(len(_pc._carga()) == 52,
+      f"exactamente 52 provincias, sin filas agregadas coladas ({len(_pc._carga())})")
+
+_muestra = ("01", "31", "33", "35", "44", "52")
+for _cp in _muestra:
+    _r = _az(_cp, limite=4)
+    check(_r.total_municipios > 0,
+          f"{_PROV[_cp]} devuelve municipios comparables ({_r.total_municipios})")
 
 
 print(f"\n{'='*54}")
