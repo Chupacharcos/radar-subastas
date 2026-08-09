@@ -5,8 +5,19 @@ inmobiliarios**. Aparece en el Portal de Subastas del BOE, entre miles de
 expedientes, con un buscador de 2015 que no calcula nada: ni cuánto vale el
 inmueble, ni cuánto renta, ni qué riesgos tiene.
 
-Este proyecto responde a la única pregunta que importa ante una subasta:
-**¿es una oportunidad o una trampa?**
+Este proyecto responde a una sola pregunta:
+
+> **¿Merece la pena comprar este piso para alquilarlo y que se pague solo?**
+
+«Se paga solo» tiene un significado exacto: el alquiler cubre la cuota de la
+hipoteca, el ITP, la notaría, el IBI, la comunidad, el seguro, el mantenimiento,
+la vacancia y el IRPF, sin que tengas que poner dinero ningún mes. Todo lo demás
+—el descuento sobre el valor tasado, el semáforo de riesgo, la comparación de
+municipios— existe para matizar esa respuesta, no para sustituirla.
+
+Y cuando la respuesta es no, se dice **qué haría falta**: cuánta entrada, o
+cuántos años, proyectando con la subida del alquiler que el INE mide en ese
+municipio concreto.
 
 **Licencia:** MIT (ver [LICENSE](LICENSE)) — uso libre, incluido comercial,
 manteniendo el aviso de copyright. Sin garantía ni soporte incluidos.
@@ -47,6 +58,24 @@ no pueda usar en tres años.
 Un buscador que sólo muestre descuentos es peligroso. Ese es el motivo de que
 este muestre el riesgo con el mismo tamaño que la rentabilidad.
 
+## La respuesta, cuando es que no
+
+Con los tipos de agosto de 2026 (Euríbor 12M al 2,88 %) y una entrada del 30 %,
+**78 municipios de los 3.388 con alquiler publicado se pagan solos**. El resto,
+no. Eso no es un defecto del cálculo: es el mercado, y decirlo es el motivo de
+que la herramienta exista.
+
+En Madrid capital, por ejemplo, ninguno de los 40 municipios comparados se paga
+solo al 30 %. Para Getafe hace falta un **57 % de entrada** —183.452 € de tu
+bolsillo, 78.501 € más de lo previsto—; o esperar **14 años**, porque la cuota de
+una hipoteca a tipo fijo no se mueve y el alquiler de Getafe sube un 3,2 % al año
+según el IPVA del INE.
+
+Hay un tercer caso que conviene nombrar: cuando el alquiler no cubre ni los
+gastos corrientes, no hay entrada que lo arregle. Ni pagándolo al contado. La
+herramienta lo dice con esas palabras en lugar de devolver un «100 % de entrada»
+que suena a solución y no lo es.
+
 ## Por qué los números no son los del folleto
 
 La mayoría de calculadoras dan la **rentabilidad bruta**: alquiler anual entre
@@ -69,12 +98,13 @@ También calcula el **precio máximo** que puedes pagar sin que el cash-flow se
 vuelva negativo. Con 900 €/mes de alquiler en Madrid: 188.289 €. Por encima de
 esa cifra, cada mes pones dinero.
 
-## Endpoints (16)
+## Endpoints (17)
 
 ```
 GET  /subastas/buscar?provincia=madrid&limite=10   Subastas de inmuebles en curso
 POST /subastas/analizar                            Análisis completo de una subasta
 POST /subastas/calculadora                         Rentabilidad de cualquier operación
+GET  /subastas/se-pagan-solos?entrada_pct=0.3      Dónde en España se paga solo
 GET  /subastas/zonas?provincia=madrid              Municipios comparados como inversión
 GET  /subastas/distritos?ciudad=madrid             Renta y alquiler por distrito censal
 GET  /subastas/alquiler?codigo_municipio=28079     Evolución del alquiler frente al precio
@@ -311,7 +341,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 243 comprobaciones
+./venv/bin/python tests/test_motor.py      # 269 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya

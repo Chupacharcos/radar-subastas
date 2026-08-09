@@ -41,8 +41,11 @@ import alquiler_real
 import distritos as distritos_ine
 import precio_compra
 import renta_ine
+from autofinanciacion import analizar_autofinanciacion
 from formato import euros
 from rentabilidad import Supuestos, analizar
+
+_CATALOGO: list[dict] | None = None
 
 # Vivienda tipo sobre la que se compara. Comparar municipios exige que TODOS usen
 # la misma, o se estarían comparando tamaños en lugar de zonas.
@@ -104,6 +107,10 @@ class Municipio:
     renta_hogar_anual: float | None = None
     esfuerzo_inquilino_pct: float | None = None
     alquiler_var_anual_pct: float | None = None
+    # La pregunta del proyecto, por municipio.
+    se_paga_solo: bool = False
+    entrada_minima_pct: float | None = None
+    anios_hasta_pagarse_solo: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -223,7 +230,24 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
             alquiler_var_anual_pct=(None if tendencia.error else tendencia.variacion_anual_pct),
         ))
 
-    municipios.sort(key=lambda x: -x.rentabilidad_neta)
+        # ¿Se paga solo? Es lo que decide si el municipio entra en la lista corta.
+        auto = analizar_autofinanciacion(precio_vivienda, importe, nombre_provincia,
+                                         s, m["codigo_ine"])
+        municipios[-1].se_paga_solo = auto.se_paga_solo
+        municipios[-1].entrada_minima_pct = auto.entrada_minima_pct
+        municipios[-1].anios_hasta_pagarse_solo = auto.anios_hasta_pagarse_solo
+
+    # Primero los que se pagan solos; entre ellos, por rentabilidad. Los que no,
+    # por cuánta entrada haría falta: es lo que decide si están a tu alcance.
+    # Los que se pagan solos primero; después, los que menos entrada extra
+    # necesitan. Un municipio donde no hay entrada que lo arregle trae
+    # `entrada_minima_pct` a None, y ese caso va al final en lugar de reventar
+    # la comparación.
+    municipios.sort(key=lambda x: (
+        not x.se_paga_solo,
+        0 if x.se_paga_solo else (x.entrada_minima_pct if x.entrada_minima_pct is not None else 2),
+        -x.rentabilidad_neta,
+    ))
 
     avisos = [
         "Todas las cifras de alquiler y renta son datos publicados, no estimaciones: "
@@ -261,7 +285,8 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
         superficie_tipo=superficie,
         total_municipios=len(municipios),
         municipios=[m.to_dict() for m in municipios],
-        criterio_orden="mayor rentabilidad neta a precio medio provincial",
+        criterio_orden=("primero los que se pagan solos con la entrada indicada; "
+                        "después, los que menos entrada extra necesitan"),
         precio_compra_provincial=precio.to_dict(),
         mejor_rentabilidad=municipios[0].nombre if municipios else None,
         mejor_cash_flow=(max(municipios, key=lambda x: x.cash_flow_mensual).nombre
@@ -288,6 +313,98 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
             "impuestos": "ITP por comunidad, normativa citada en impuestos.py",
         },
     )
+
+
+def _catalogo_nacional() -> list[dict]:
+    """Todos los municipios con alquiler y precio, en una lista plana.
+
+    Se construye una sola vez por proceso: recorrer las 52 provincias abriendo
+    cachés en cada iteración tardaba más de un minuto, y lo que viene después es
+    aritmética pura.
+    """
+    global _CATALOGO
+    if _CATALOGO is not None:
+        return _CATALOGO
+
+    precios = precio_compra.municipios_con_precio()
+    catalogo: list[dict] = []
+    for cp, nombre in PROVINCIAS.items():
+        prov = precio_compra.precio_provincia(cp)
+        if prov.error or not prov.euros_m2:
+            continue
+        for m in alquiler_real.municipios_de_provincia(cp):
+            # El €/m² efectivo, con la preferencia por contratos nuevos donde los
+            # haya. Sin esto, este listado y la comparación por provincia daban
+            # respuestas distintas para el mismo municipio.
+            _, origen = alquiler_real.alquiler_estimado_de(m["codigo_ine"], 1)
+            if not origen.get("disponible"):
+                continue
+            euros_m2 = precios.get(m["codigo_ine"])
+            catalogo.append({
+                "codigo_ine": m["codigo_ine"], "nombre": m["nombre"],
+                "provincia": nombre, "codigo_provincia": cp,
+                "alquiler_m2_mes": origen["euros_m2_mes"],
+                "alquiler_base": origen["base"], "anio_alquiler": origen["anio"],
+                "viviendas_alquiladas": m.get("viviendas"),
+                "precio_m2_compra": euros_m2 or prov.euros_m2,
+                "precio_es_municipal": euros_m2 is not None,
+            })
+    _CATALOGO = catalogo
+    return catalogo
+
+
+def se_pagan_solos(superficie: int = SUPERFICIE_TIPO, s: Supuestos | None = None,
+                   limite: int = 40) -> dict:
+    """Los municipios de España donde una vivienda tipo se paga sola.
+
+    Es la pregunta del proyecto llevada al mapa entero: en lugar de mirar una
+    provincia y descubrir que ninguno sale, se busca directamente dónde el
+    alquiler cubre la hipoteca y los gastos. Con los supuestos por defecto salen
+    unas decenas, casi todas en costa y en municipios donde el alquiler
+    vacacional tira del precio del arrendamiento sin tirar del de compra.
+    """
+    s = s or Supuestos()
+    positivos = []
+    for m in _catalogo_nacional():
+        alquiler = m["alquiler_m2_mes"] * superficie
+        precio = m["precio_m2_compra"] * superficie
+        a = analizar(precio, alquiler, m["provincia"], s)
+        if a.cash_flow_mensual < 0:
+            continue
+        positivos.append(dict(m, **{
+            "alquiler_mensual": round(alquiler, 2),
+            "precio_vivienda": round(precio, 2),
+            "cuota_hipoteca_mensual": a.cuota_mensual,
+            "cash_flow_mensual": a.cash_flow_mensual,
+            "rentabilidad_neta": a.rentabilidad_neta,
+            "capital_necesario": a.capital_aportado,
+        }))
+
+    positivos.sort(key=lambda x: -x["cash_flow_mensual"])
+    return {
+        "total": len(positivos),
+        "municipios": positivos[:limite],
+        "superficie_tipo": superficie,
+        "supuestos": {"entrada_pct": s.entrada_pct, "interes_anual": s.interes_anual,
+                      "anios_hipoteca": s.anios_hipoteca, "vacancia_pct": s.vacancia_pct},
+        "criterio_orden": "mayor cash-flow mensual",
+        "avisos": [
+            f"«Se paga solo» significa cash-flow mensual igual o mayor que cero con "
+            f"una entrada del {s.entrada_pct*100:.0f} %: el alquiler cubre la cuota, "
+            "el ITP amortizado, el IBI, la comunidad, el seguro, el mantenimiento, la "
+            "vacancia y el IRPF. No es rentabilidad, es no poner dinero cada mes.",
+            "Sobre una vivienda tipo del mismo tamaño en todos, para que la "
+            "comparación sea entre zonas y no entre pisos distintos.",
+            "Que salgan pocos no es un fallo del cálculo: con los tipos actuales, en "
+            "la mayor parte de España un piso comprado a precio de mercado y "
+            "financiado al 70 % no se paga solo. Que la herramienta lo diga es el "
+            "motivo de que exista.",
+        ],
+        "fuentes": {
+            "alquiler": alquiler_real.FUENTE_MIVAU,
+            "precio_compra": precio_compra.FUENTE_MUNICIPAL,
+        },
+    }
 
 
 def contexto_distritos(ciudad: str) -> dict:

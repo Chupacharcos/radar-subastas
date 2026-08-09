@@ -181,11 +181,25 @@ def _destila(contenido: str) -> dict:
     return out
 
 
+_MUNICIPIOS_MEMORIA: dict | None = None
+
+
 def _carga(forzar: bool = False) -> dict:
+    """Municipios destilados, memoizados en memoria.
+
+    Sin la memoria intermedia esto releía y reparseaba varios MB de JSON en cada
+    consulta: recorrer los 3.388 municipios para el listado nacional tardaba
+    minutos en lugar de segundos.
+    """
+    global _MUNICIPIOS_MEMORIA
+    if _MUNICIPIOS_MEMORIA is not None and not forzar:
+        return _MUNICIPIOS_MEMORIA
+
     destino = CACHE_DIR / "mivau_municipios.json"
     if destino.exists() and not forzar:
         try:
-            return json.loads(destino.read_text(encoding="utf-8"))["municipios"]
+            _MUNICIPIOS_MEMORIA = json.loads(destino.read_text(encoding="utf-8"))["municipios"]
+            return _MUNICIPIOS_MEMORIA
         except Exception:
             pass
 
@@ -199,6 +213,7 @@ def _carga(forzar: bool = False) -> dict:
         "descargado": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "municipios": municipios,
     }, ensure_ascii=False), encoding="utf-8")
+    _MUNICIPIOS_MEMORIA = municipios
     return municipios
 
 

@@ -690,6 +690,80 @@ for _cp in _muestra:
           f"{_PROV[_cp]} devuelve municipios comparables ({_r.total_municipios})")
 
 
+print("\n=== 30) ¿Se paga solo? — la pregunta del proyecto ===")
+from autofinanciacion import (OBJETIVO, analizar_autofinanciacion,
+                              entrada_minima_para_cash_flow)
+
+# Caso que sí: piso barato con alquiler alto.
+si = analizar_autofinanciacion(90_000, 750, "madrid", Supuestos(entrada_pct=0.30), "28092")
+check(si.se_paga_solo is True, f"90k con 750 €/mes se paga solo ({si.cash_flow_mensual:+.0f} €)")
+check(si.veredicto.startswith("Sí"), "y el veredicto empieza por sí")
+check(si.entrada_minima_pct is None, "no hace falta calcular entrada mínima si ya sale")
+
+# Caso que no, pero se arregla con más entrada.
+no = analizar_autofinanciacion(288_000, 849, "madrid", Supuestos(entrada_pct=0.30), "28065")
+check(no.se_paga_solo is False, f"288k con 849 €/mes no se paga solo ({no.cash_flow_mensual:+.0f} €)")
+check(0.30 < no.entrada_minima_pct < 1.0,
+      f"pero se pagaría con un {no.entrada_minima_pct*100:.0f} % de entrada")
+check(no.capital_extra_necesario > 0, "y dice cuánto capital extra hace falta")
+check(no.imposible_a_cualquier_entrada is False, "no es un caso imposible")
+
+# La entrada mínima tiene que ser exactamente el punto de corte.
+s_min = Supuestos(entrada_pct=no.entrada_minima_pct)
+check(analizar(288_000, 849, "madrid", s_min).cash_flow_mensual >= OBJETIVO - 0.5,
+      "en la entrada mínima el cash-flow ya no es negativo")
+s_menos = Supuestos(entrada_pct=max(0.0, no.entrada_minima_pct - 0.02))
+check(analizar(288_000, 849, "madrid", s_menos).cash_flow_mensual < OBJETIVO,
+      "y dos puntos por debajo todavía lo es: el corte es el corte")
+
+# Caso imposible: el alquiler no cubre ni los gastos corrientes.
+jamas = analizar_autofinanciacion(300_000, 120, "madrid", Supuestos(entrada_pct=0.30), "28079")
+check(jamas.imposible_a_cualquier_entrada is True,
+      "con 120 €/mes no se paga solo ni al contado")
+check("ni pagándolo al contado" in " ".join(jamas.explicacion).lower(),
+      "y se dice sin rodeos")
+check(entrada_minima_para_cash_flow(300_000, 120, "madrid")["posible"] is False,
+      "la entrada mínima devuelve «no posible» en lugar de un 100 % engañoso")
+
+# La proyección de años usa la subida REAL del alquiler de ese municipio.
+check(no.anios_hasta_pagarse_solo and 0 < no.anios_hasta_pagarse_solo <= 30,
+      f"proyecta en cuántos años se pagaría solo ({no.anios_hasta_pagarse_solo})")
+check(no.proyeccion and "IPVA" in no.proyeccion["fuente"],
+      "con el IPVA del INE, no con una subida inventada")
+sin_municipio = analizar_autofinanciacion(288_000, 849, "madrid", Supuestos(entrada_pct=0.30), None)
+check(sin_municipio.anios_hasta_pagarse_solo is None,
+      "sin municipio no se proyecta nada")
+check(any("no se puede proyectar" in e.lower() for e in sin_municipio.explicacion),
+      "y se explica por qué en lugar de callar")
+
+
+print("\n=== 31) Dónde se paga solo en toda España ===")
+from zonas import se_pagan_solos
+
+solos = se_pagan_solos(80, Supuestos(entrada_pct=0.30, interes_anual=0.03684), limite=200)
+check(solos["total"] > 0, f"{solos['total']} municipios se pagan solos con 30 % de entrada")
+check(all(m["cash_flow_mensual"] >= 0 for m in solos["municipios"]),
+      "todos los listados tienen cash-flow positivo")
+check(solos["municipios"] == sorted(solos["municipios"],
+                                    key=lambda m: -m["cash_flow_mensual"]),
+      "ordenados por lo que dejan al mes")
+
+# Coherencia con la vista por provincia: la misma pregunta, la misma respuesta.
+_uno = solos["municipios"][0]
+_z = _az(_uno["codigo_provincia"], limite=100)
+_mismo = [m for m in _z.municipios if m["codigo_ine"] == _uno["codigo_ine"]]
+check(_mismo and _mismo[0]["se_paga_solo"] is True,
+      f"{_uno['nombre']} también sale como «se paga solo» en su provincia")
+
+# Más entrada, más municipios: si no, el cálculo no responde a la entrada.
+pocos = se_pagan_solos(80, Supuestos(entrada_pct=0.10, interes_anual=0.03684), limite=200)
+muchos = se_pagan_solos(80, Supuestos(entrada_pct=0.60, interes_anual=0.03684), limite=200)
+check(pocos["total"] <= solos["total"] <= muchos["total"],
+      f"a más entrada, más municipios ({pocos['total']} → {solos['total']} → {muchos['total']})")
+check(any("no es un fallo del cálculo" in a for a in solos["avisos"]),
+      "y se explica que salgan pocos")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

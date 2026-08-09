@@ -25,7 +25,8 @@ from catastro import consultar as consultar_catastro
 from rentabilidad import Supuestos, analizar, precio_maximo_para_cash_flow
 from riesgo import evaluar as evaluar_riesgo
 from valoracion import valorar
-from zonas import analizar_zonas, contexto_distritos, provincias_disponibles
+from zonas import (analizar_zonas, contexto_distritos, provincias_disponibles,
+                   se_pagan_solos)
 from inversor import analizar_inversor
 from contexto_zona import evaluar_zona
 from entorno import analizar_entorno, geocodificar
@@ -121,6 +122,27 @@ def zonas(provincia: str = Query("madrid", description="Nombre o código INE de 
         interes_anual = tipo_hipotecario_estimado(diferencial)["tipo_estimado"]
     s = Supuestos(entrada_pct=entrada_pct, interes_anual=interes_anual, anios_hipoteca=anios)
     return analizar_zonas(provincia, superficie, s, limite).to_dict()
+
+
+@app.get("/subastas/se-pagan-solos")
+def municipios_que_se_pagan_solos(
+        superficie: int = Query(80, ge=25, le=400),
+        entrada_pct: float = Query(0.30, ge=0.0, le=1.0),
+        interes_anual: float = Query(None, ge=0.0, le=0.2),
+        anios: int = Query(25, ge=5, le=40),
+        diferencial: float = Query(None, ge=0.0, le=0.05),
+        limite: int = Query(40, ge=5, le=200)):
+    """Dónde en España una vivienda tipo se paga sola.
+
+    La pregunta del proyecto llevada al mapa entero: en qué municipios el
+    alquiler real cubre la hipoteca y todos los gastos, sin poner dinero cada
+    mes. Con los supuestos por defecto salen unas decenas de los 3.388 con dato,
+    y eso es en sí la respuesta más útil."""
+    if interes_anual is None:
+        from datos_vivos import tipo_hipotecario_estimado
+        interes_anual = tipo_hipotecario_estimado(diferencial)["tipo_estimado"]
+    s = Supuestos(entrada_pct=entrada_pct, interes_anual=interes_anual, anios_hipoteca=anios)
+    return se_pagan_solos(superficie, s, limite)
 
 
 @app.get("/subastas/distritos")
@@ -280,6 +302,17 @@ def analizar_subasta(datos: AnalisisIn):
         codigo_ine_municipio=inmueble.get("codigo_ine_municipio"),
     )
 
+    # La pregunta del proyecto, respondida de frente y antes que nada.
+    autofinanciacion = None
+    if v.alquiler_mensual:
+        from autofinanciacion import analizar_autofinanciacion
+        cp, cm = inmueble.get("codigo_ine_provincia"), inmueble.get("codigo_ine_municipio")
+        autofinanciacion = analizar_autofinanciacion(
+            subasta.valor_subasta, v.alquiler_mensual,
+            inmueble.get("provincia") or subasta.provincia, supuestos,
+            (str(cp).zfill(2) + str(cm).zfill(3)) if cp and cm else None,
+        ).to_dict()
+
     metricas = None
     if v.alquiler_mensual:
         metricas = analizar_inversor(
@@ -297,6 +330,7 @@ def analizar_subasta(datos: AnalisisIn):
         entorno["coordenadas"] = {"lat": coords[0], "lon": coords[1]}
 
     return {
+        "se_paga_solo": autofinanciacion,
         "subasta": subasta.to_dict() | {"url": subasta.url},
         "inmueble": inmueble,
         "valoracion": v.to_dict(),
@@ -383,8 +417,12 @@ def calculadora(datos: CalculadoraIn):
     Útil para contrastar: los portales muestran rentabilidad bruta, que ignora
     ITP, gastos de compra y vacancia."""
     supuestos = datos.supuestos.a_supuestos() if datos.supuestos else Supuestos()
+    from autofinanciacion import analizar_autofinanciacion
     resultado = analizar(datos.precio_compra, datos.alquiler_mensual, datos.provincia, supuestos)
     return {
+        "se_paga_solo": analizar_autofinanciacion(
+            datos.precio_compra, datos.alquiler_mensual, datos.provincia, supuestos
+        ).to_dict(),
         "analisis": resultado.to_dict(),
         "precio_maximo_cash_flow_cero": precio_maximo_para_cash_flow(
             datos.alquiler_mensual, 0.0, datos.provincia, supuestos
