@@ -211,6 +211,22 @@ def comprobar() -> list[Comprobacion]:
         resultados.append(Comprobacion("Alquiler real por municipio (ministerio)",
                                        "caducado", f"No se pudo comprobar: {type(e).__name__}."))
 
+    # Fianzas: son las que dan el alquiler de los contratos NUEVOS. Si una deja
+    # de responder, ese territorio pasa a usar el parque arrendado sin avisar.
+    try:
+        from alquiler_real import _fianzas_catalunya, _fianzas_valencianas
+        for nombre, datos in (("Cataluña", _fianzas_catalunya()),
+                              ("Comunitat Valenciana", _fianzas_valencianas())):
+            resultados.append(Comprobacion(
+                f"Fianzas de alquiler · {nombre}",
+                "ok" if len(datos) > 50 else "revisar",
+                f"{len(datos)} municipios con contratos nuevos."
+                + ("" if len(datos) > 50 else " Son menos de los esperados."),
+            ))
+    except Exception as e:
+        resultados.append(Comprobacion("Fianzas de alquiler", "revisar",
+                                       f"No se pudieron comprobar: {type(e).__name__}."))
+
     try:
         from precio_compra import frescura as frescura_precio
         datos = frescura_precio()

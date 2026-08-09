@@ -371,9 +371,27 @@ check(pequeno.error is not None and "anónima" in pequeno.error,
 # Cataluña añade contratos nuevos; el resto de España no tiene equivalente.
 bcn = alquiler_municipio("08019")
 check(bcn.contratos_nuevos is not None, "Barcelona trae el alquiler de contratos nuevos")
-check(bcn.contratos_nuevos["media_mensual"] > bcn.mediana_mensual,
+check(bcn.contratos_nuevos["importe_mensual"] > bcn.mediana_mensual,
       f"que va por encima del parque ya alquilado "
-      f"({bcn.contratos_nuevos['media_mensual']} > {bcn.mediana_mensual})")
+      f"({bcn.contratos_nuevos['importe_mensual']} > {bcn.mediana_mensual})")
+check(bcn.contratos_nuevos["estadistico"] == "media",
+      "Cataluña publica una media, y la respuesta lo dice")
+
+# La Comunitat Valenciana publica los depósitos uno a uno: la mediana se calcula
+# aquí. La fianza de vivienda es una mensualidad por el art. 36.1 de la LAU.
+vlc = alquiler_municipio("46250")
+check(vlc.contratos_nuevos is not None, "Valencia también trae contratos nuevos")
+check(vlc.contratos_nuevos["estadistico"] == "mediana",
+      "y ahí es una mediana calculada sobre los depósitos, no una media")
+check(vlc.contratos_nuevos["anio"] >= 2025,
+      f"con dato más reciente que el del ministerio ({vlc.contratos_nuevos['anio']} vs {vlc.anio})")
+check(vlc.contratos_nuevos["contratos"] > 1000,
+      f"sobre {vlc.contratos_nuevos['contratos']} fianzas")
+# Guardia contra el error de leer la fianza como algo que no es una mensualidad:
+# si el ratio se disparase, es que el campo cambió de significado.
+check(1.0 < vlc.contratos_nuevos["importe_mensual"] / vlc.mediana_mensual < 2.5,
+      f"y en una banda coherente con el parque ({vlc.contratos_nuevos['importe_mensual']/vlc.mediana_mensual:.2f}×)")
+check(alquiler_municipio("03014").contratos_nuevos is not None, "Alicante también")
 check(bcn.contratos_nuevos["contratos"] > 100,
       f"con su número de fianzas ({bcn.contratos_nuevos['contratos']})")
 check(md.contratos_nuevos is None, "fuera de Cataluña no se inventa ese dato")

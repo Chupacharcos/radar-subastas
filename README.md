@@ -104,6 +104,7 @@ curl -X POST http://localhost:8010/subastas/calculadora \
 | [Ministerio de Vivienda](https://cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP006_01.csv) | **Valor tasado de la vivienda libre** en €/m², por provincia y trimestre | CSV público |
 | [Ministerio de Vivienda](https://apps.fomento.gob.es/boletinonline2/sedal/35103500.XLS) | **Valor tasado por municipio** (más de 25.000 habitantes), por trimestre y tramo de antigüedad | Excel público |
 | [Fianzas de alquiler de Cataluña](https://analisi.transparenciacatalunya.cat/resource/qww9-bvhh.json) | Alquiler medio de los **contratos nuevos** por municipio y trimestre | API pública |
+| [Fianzas de alquiler de la Comunitat Valenciana](https://dadesobertes.gva.es/dataset?q=fianzas+alquiler) | Depósitos uno a uno; la mediana por municipio es el alquiler de los contratos nuevos | API pública |
 | [INE, Atlas de renta](https://www.ine.es/dynt3/inebase/index.htm?padre=7132) | Renta del hogar por municipio, **distrito y sección censal** | CSV público |
 | [INE, IPVA (op. 432)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736169903) | Evolución del alquiler por municipio y distrito, con los **contratos declarados a Hacienda** | CSV público |
 | [INE, IPV (op. 15)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736152838) | Evolución del precio de compra por comunidad autónoma | CSV público |
@@ -198,6 +199,28 @@ de fianzas de la Generalitat— den cifras coherentes entre sí, y en la direcci
 esperable, es la mejor comprobación disponible de que ninguna de las dos está mal
 leída.
 
+### Lo que se firma hoy, no lo que se firmó hace años
+
+El dato del ministerio es la mediana del **parque ya arrendado**. Quien compra
+para alquilar no cobra eso: cobra lo de los contratos nuevos. Esos los miden los
+registros de fianzas, porque la fianza se deposita al firmar, y dos comunidades
+los publican en abierto.
+
+Cataluña lo da ya agregado por municipio y trimestre. La Comunitat Valenciana lo
+da **depósito a depósito**: 20.319 depósitos de 2026, con la mediana calculada
+por municipio. Cada importe es una mensualidad de renta porque el artículo 36.1
+de la LAU obliga a depositar «cantidad equivalente a una mensualidad» al alquilar
+una vivienda.
+
+La distancia con el parque arrendado no es la misma en las dos, y la diferencia
+es informativa: **+26 % en Barcelona y +62 % en Valencia**. No es un error de
+lectura. Cataluña topa por ley la renta de los contratos nuevos en zona
+tensionada desde 2024 y la Comunitat Valenciana apenas, así que allí los
+contratos nuevos sí se van al mercado. Es exactamente el tipo de cosa que la
+media del parque esconde.
+
+Donde hay fianzas, mandan sobre el parque: 499 municipios en siete provincias.
+
 ### El precio de compra, municipio a municipio
 
 El otro número que faltaba. El fichero de datos abiertos del ministerio sólo
@@ -288,7 +311,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 235 comprobaciones
+./venv/bin/python tests/test_motor.py      # 243 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya

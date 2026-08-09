@@ -12,8 +12,9 @@ existen datos publicados, y con cuatro fuentes oficiales:
 
   - **Alquiler**: mediana real del municipio, de los arrendamientos declarados a
     la Agencia Tributaria, con su horquilla P25-P75 y su superficie mediana. En
-    Cataluña se prefiere el alquiler de los contratos nuevos, que es lo que
-    cobraría de verdad quien compre hoy.
+    Cataluña y la Comunitat Valenciana, donde los registros de fianzas son
+    públicos, se prefiere el alquiler de los CONTRATOS NUEVOS: es lo que cobraría
+    de verdad quien compre hoy, y va bastante por encima del parque arrendado.
   - **Precio de compra**: valor tasado oficial en €/m² **de cada municipio**. La
     media provincial se queda corta en las capitales y se pasa en la periferia
     —Madrid capital 5.466 €/m² frente a Móstoles 3.026, con una media provincial
@@ -24,9 +25,10 @@ existen datos publicados, y con cuatro fuentes oficiales:
   - **Evolución del alquiler** (INE, IPVA), que dice hacia dónde va cada uno.
 
 Se perdió el detalle por barrio, que no era real, y se ganó cobertura: 163
-municipios sólo en Madrid, frente a los 23 barrios inventados de antes. Para
-Madrid y Barcelona se conserva el desglose por distrito censal en lo que sí está
-medido —renta y evolución del alquiler— a través de `contexto_distritos`.
+municipios sólo en Madrid, frente a los 23 barrios inventados de antes, y las 52
+provincias con dato. Para Madrid, Barcelona, Valencia, Sevilla y Málaga se
+conserva el desglose por distrito censal en lo que sí está medido a ese grano
+—renta y evolución del alquiler— a través de `contexto_distritos`.
 """
 from __future__ import annotations
 
@@ -229,11 +231,14 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
             "de la renta del hogar. Por encima del 30 % la morosidad deja de ser una "
             "hipótesis, y aquí ambos números están medidos."
         )
-    if cp in {"08", "17", "25", "43"}:
+    con_fianzas = [m for m in municipios if "contratos nuevos" in m.alquiler_base]
+    if con_fianzas:
         avisos.append(
-            "En Cataluña el alquiler usado es el de los CONTRATOS NUEVOS, del registro "
-            "de fianzas, que va por encima del parque ya alquilado y es lo que cobraría "
-            "quien compre ahora."
+            f"En {len(con_fianzas)} de estos municipios el alquiler usado es el de los "
+            "CONTRATOS NUEVOS, del registro de fianzas de su comunidad —las publican "
+            "Cataluña y la Comunitat Valenciana—, que va por encima del parque ya "
+            "alquilado y es lo que cobraría quien compre ahora. En el resto es la "
+            "mediana del parque arrendado que publica el ministerio."
         )
 
     return AnalisisZonas(

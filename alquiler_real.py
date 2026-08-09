@@ -31,11 +31,22 @@ Dos advertencias que conviene no perder de vista:
   - Es el alquiler del **parque arrendado**, no el de los contratos que se firman
     hoy. Los contratos nuevos van por encima.
 
-Para eso segundo está la otra fuente: el **registro de fianzas de alquiler de
-Cataluña**, que publica el alquiler medio de los contratos **nuevos** por
-municipio y trimestre, con el número de contratos. Llega hasta el trimestre en
-curso. Sólo cubre Cataluña, pero donde llega permite ver la distancia entre lo
-que paga quien ya vive de alquiler y lo que pagaría quien entra hoy.
+Para eso segundo están los **registros de fianzas**, que miden los contratos que
+se firman hoy porque la fianza se deposita al firmar. Dos comunidades los
+publican en abierto:
+
+  - **Cataluña**, ya agregado: alquiler medio por municipio y trimestre, con el
+    número de contratos, hasta el trimestre en curso.
+  - **Comunitat Valenciana**, depósito a depósito: la mediana por municipio se
+    calcula aquí. Cada importe es una mensualidad de renta porque el artículo
+    36.1 de la LAU obliga a depositar «cantidad equivalente a una mensualidad»
+    en el arrendamiento de viviendas.
+
+Donde llegan, permiten ver la distancia entre lo que paga quien ya vive de
+alquiler y lo que pagaría quien entra hoy. Esa distancia no es la misma en las
+dos: +26 % en Barcelona y +62 % en Valencia. No es un error de lectura, es que
+Cataluña tiene tope legal de renta en zona tensionada desde 2024 y la Comunitat
+Valenciana apenas, así que allí los contratos nuevos sí se van al mercado.
 """
 from __future__ import annotations
 
@@ -52,6 +63,14 @@ import httpx
 CACHE_DIR = Path(__file__).parent / "data" / "alquiler_real"
 MIVAU_URL = "https://cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP001_01.csv"
 FIANZAS_URL = "https://analisi.transparenciacatalunya.cat/resource/qww9-bvhh.json"
+# La Generalitat Valenciana publica los depósitos UNO A UNO, no agregados. Por el
+# artículo 36.1 de la LAU la fianza de un arrendamiento de vivienda es «cantidad
+# equivalente a una mensualidad de renta», así que cada importe es un alquiler y
+# la mediana por municipio es un alquiler mediano de contratos nuevos.
+GVA_BUSQUEDA = ("https://dadesobertes.gva.es/api/3/action/package_search"
+                "?q=fianzas+alquiler&rows=1")
+PROVINCIAS_VALENCIANAS = ("03", "12", "46")
+MIN_FIANZAS_MUNICIPIO = 8   # por debajo, la mediana es ruido
 TIMEOUT = 180.0
 MAX_BYTES = 120 * 1024 * 1024
 
@@ -64,6 +83,8 @@ FUENTE_MIVAU = ("Ministerio de Vivienda y Agenda Urbana, precio del alquiler por
                 "municipio (arrendamientos declarados a la Agencia Tributaria)")
 FUENTE_FIANZAS = ("Generalitat de Catalunya, registro de fianzas de alquiler "
                   "(contratos nuevos depositados)")
+FUENTE_GVA = ("Generalitat Valenciana, fianzas de alquiler depositadas; el importe "
+              "es una mensualidad de renta por el artículo 36.1 de la LAU")
 
 
 @dataclass
@@ -228,9 +249,9 @@ def _fianzas_catalunya(forzar: bool = False) -> dict:
         if n <= int(mejor.get(codigo, {}).get("contratos", -1)):
             continue
         mejor[codigo] = {
-            "media_mensual": round(float(renda), 2), "contratos": n,
-            "anio": int(f.get("any") or 0), "periodo": f.get("periode"),
-            "fuente": FUENTE_FIANZAS,
+            "importe_mensual": round(float(renda), 2), "estadistico": "media",
+            "contratos": n, "anio": int(f.get("any") or 0),
+            "periodo": f.get("periode"), "fuente": FUENTE_FIANZAS,
         }
 
     if mejor:
@@ -250,15 +271,86 @@ def _trimestre_actual() -> str:
     return f"{hoy.year}T{(hoy.month - 1) // 3 + 1}"
 
 
+_GVA_MEMORIA: dict | None = None
+
+
+def _fianzas_valencianas(forzar: bool = False) -> dict:
+    """Mediana de las fianzas depositadas por municipio en la Comunitat Valenciana.
+
+    A diferencia de Cataluña, aquí el portal publica los depósitos uno a uno, así
+    que la mediana se calcula aquí. Se usa mediana y no media porque un puñado de
+    alquileres de lujo desplazan la media de un municipio pequeño; y se descartan
+    los municipios con menos de ocho depósitos, donde el dato sería anecdótico.
+    """
+    global _GVA_MEMORIA
+    if _GVA_MEMORIA is not None and not forzar:
+        return _GVA_MEMORIA
+
+    destino = CACHE_DIR / "fianzas_valencia.json"
+    if destino.exists() and not forzar:
+        try:
+            guardado = json.loads(destino.read_text(encoding="utf-8"))
+            if guardado.get("trimestre_descarga") == _trimestre_actual():
+                _GVA_MEMORIA = guardado["municipios"]
+                return _GVA_MEMORIA
+        except Exception:
+            pass
+
+    try:
+        catalogo = httpx.get(GVA_BUSQUEDA, timeout=60.0).json()
+        recursos = catalogo["result"]["results"][0]["resources"]
+        url = next(r["url"] for r in recursos if r.get("format") == "CSV")
+        anio = int(catalogo["result"]["results"][0]["title"].strip()[-4:])
+        contenido = _descargar(url)
+    except Exception:
+        return {}
+
+    importes: dict[str, list[float]] = {}
+    for fila in csv.DictReader(io.StringIO(contenido), delimiter=";"):
+        importe = _num(fila.get("importe_fianza") or "")
+        if not importe or importe <= 0:
+            continue
+        codigo = ((fila.get("cod_provincia") or "").strip().zfill(2)
+                  + (fila.get("cod_municipio") or "").strip().zfill(3))
+        if len(codigo) == 5:
+            importes.setdefault(codigo, []).append(importe)
+
+    out = {
+        codigo: {
+            "importe_mensual": round(median(v), 2),
+            "estadistico": "mediana",
+            "contratos": len(v),
+            "anio": anio,
+            "periodo": f"año {anio}",
+            "fuente": FUENTE_GVA,
+        }
+        for codigo, v in importes.items() if len(v) >= MIN_FIANZAS_MUNICIPIO
+    }
+
+    if out:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        destino.write_text(json.dumps({
+            "origen": url,
+            "trimestre_descarga": _trimestre_actual(),
+            "descargado": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "municipios": out,
+        }, ensure_ascii=False), encoding="utf-8")
+    _GVA_MEMORIA = out
+    return out
+
+
 def _contratos_nuevos(codigo_ine: str) -> dict | None:
-    """Alquiler medio de los contratos nuevos, si el municipio es catalán.
+    """Alquiler de los contratos nuevos, donde su comunidad publica las fianzas.
 
     Las fianzas se depositan al firmar, así que esto mide el mercado de hoy y no
-    el parque ya alquilado. Fuera de Cataluña no hay equivalente publicado.
+    el parque ya alquilado. Lo publican Cataluña —ya agregado— y la Comunitat
+    Valenciana —depósito a depósito—. En el resto de España no hay equivalente.
     """
-    if not codigo_ine.startswith(PROVINCIAS_CATALANAS):
-        return None
-    return _fianzas_catalunya().get(codigo_ine)
+    if codigo_ine.startswith(PROVINCIAS_CATALANAS):
+        return _fianzas_catalunya().get(codigo_ine)
+    if codigo_ine.startswith(PROVINCIAS_VALENCIANAS):
+        return _fianzas_valencianas().get(codigo_ine)
+    return None
 
 
 def alquiler_municipio(codigo_ine: str, tipo_vivienda: str = "colectiva") -> AlquilerReal:
@@ -322,13 +414,13 @@ def alquiler_municipio(codigo_ine: str, tipo_vivienda: str = "colectiva") -> Alq
     )
     nuevos = resultado.contratos_nuevos
     if nuevos and mediana:
-        salto = (nuevos["media_mensual"] / mediana - 1) * 100
+        salto = (nuevos["importe_mensual"] / mediana - 1) * 100
         resultado.avisos.append(
-            f"Los contratos firmados en {nuevos['anio']} ({nuevos['periodo']}) van a "
-            f"{nuevos['media_mensual']:.0f} € de media sobre {nuevos['contratos']} "
-            f"fianzas depositadas, un {salto:+.0f} % respecto al parque ya alquilado. "
-            "Quien compra hoy para alquilar cobra lo de los contratos nuevos, no la "
-            "mediana del parque."
+            f"Los contratos firmados en {nuevos['periodo']} van a "
+            f"{nuevos['importe_mensual']:.0f} € de {nuevos['estadistico']} sobre "
+            f"{nuevos['contratos']} fianzas depositadas, un {salto:+.0f} % respecto al "
+            "parque ya alquilado. Quien compra hoy para alquilar cobra lo de los "
+            "contratos nuevos, no la mediana del parque."
         )
     return resultado
 
@@ -349,7 +441,7 @@ def alquiler_estimado_de(codigo_ine: str, superficie_m2: float,
     base_m2, base = real.euros_m2_mes, "parque alquilado"
     nuevos = real.contratos_nuevos
     if nuevos and real.mediana_mensual:
-        base_m2 = real.euros_m2_mes * (nuevos["media_mensual"] / real.mediana_mensual)
+        base_m2 = real.euros_m2_mes * (nuevos["importe_mensual"] / real.mediana_mensual)
         base = f"contratos nuevos de {nuevos['anio']}"
 
     aviso = ("El €/m² es la mediana del municipio entero aplicada a la superficie de "
