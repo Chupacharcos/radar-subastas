@@ -19,9 +19,9 @@ Portal de Subastas del BOE     ──►  qué se subasta y por cuánto
         ▼
 Sede Electrónica del Catastro  ──►  superficie, año y uso reales
         │
-        ├──► modelo de precios        ──►  cuánto vale en el mercado
-        ├──► zonas de revalorización  ──►  si la zona sube
-        └──► motor financiero          ──►  qué deja al mes de verdad
+        ├──► valor tasado oficial     ──►  cuánto vale hoy en ese municipio
+        ├──► alquiler declarado       ──►  cuánto se paga de verdad allí
+        └──► motor financiero         ──►  qué deja al mes tras impuestos
                     │
                     ▼
         semáforo de riesgo + comprobaciones antes de pujar
@@ -34,12 +34,12 @@ Subasta `SUB-JA-2026-265154`, Las Rozas (Madrid), consultada en agosto de 2026:
 | | |
 |---|---|
 | Sale a | 817.026 € — 2.053 €/m² |
-| Valor de referencia | 1.610.905 € — 4.048 €/m² tasados en la provincia (2026T1) |
-| **Descuento** | **49,3 %** |
+| Valor de referencia | 1.758.961 € — 4.420 €/m² tasados en Las Rozas (2026T1) |
+| **Descuento** | **53,6 %** |
 | Alquiler del municipio | 996 €/mes de mediana (Las Rozas, 2024) |
 | **Riesgo** | **CRÍTICO (90/100)** |
 
-Ese 47 % parece un chollo. El semáforo explica por qué probablemente no lo es:
+Ese 53 % parece un chollo. El semáforo explica por qué probablemente no lo es:
 **ocupante desconocido**, **no visitable** y **vivienda habitual del deudor**.
 Quien puje bloquea 40.851 € de depósito para adjudicarse una vivienda que quizá
 no pueda usar en tres años.
@@ -100,6 +100,7 @@ curl -X POST http://localhost:8010/subastas/calculadora \
 | [Sede Electrónica del Catastro](https://ovc.catastro.meh.es) | Superficie, año y uso del inmueble | API pública, sin clave |
 | [Ministerio de Vivienda](https://cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP001_01.csv) | **Alquiler real por municipio**: mediana, P25 y P75 de los arrendamientos declarados a la Agencia Tributaria | CSV público |
 | [Ministerio de Vivienda](https://cdn.mivau.gob.es/portal-web-mivau/Datos_MIVAU/CSV/VDP006_01.csv) | **Valor tasado de la vivienda libre** en €/m², por provincia y trimestre | CSV público |
+| [Ministerio de Vivienda](https://apps.fomento.gob.es/boletinonline2/sedal/35103500.XLS) | **Valor tasado por municipio** (más de 25.000 habitantes), por trimestre y tramo de antigüedad | Excel público |
 | [Fianzas de alquiler de Cataluña](https://analisi.transparenciacatalunya.cat/resource/qww9-bvhh.json) | Alquiler medio de los **contratos nuevos** por municipio y trimestre | API pública |
 | [INE, Atlas de renta](https://www.ine.es/dynt3/inebase/index.htm?padre=7132) | Renta del hogar por municipio, **distrito y sección censal** | CSV público |
 | [INE, IPVA (op. 432)](https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736169903) | Evolución del alquiler por municipio y distrito, con los **contratos declarados a Hacienda** | CSV público |
@@ -184,6 +185,34 @@ de fianzas de la Generalitat— den cifras coherentes entre sí, y en la direcci
 esperable, es la mejor comprobación disponible de que ninguna de las dos está mal
 leída.
 
+### El precio de compra, municipio a municipio
+
+El otro número que faltaba. El fichero de datos abiertos del ministerio sólo
+llega a provincia, y esa media miente por los dos extremos: la Comunidad de
+Madrid está en **4.048 €/m²**, pero Madrid capital vale **5.466** y Móstoles
+**3.026**. Valorar una subasta de la capital con la media provincial la
+infravalora un 26 %, y el descuento —el titular del proyecto— sale mal.
+
+El detalle municipal sí existe, pero no en el portal de datos abiertos ni en el
+CDN: está en el BoletínOnline, un Excel de formato heredado que sigue vivo y se
+actualiza cada trimestre.
+
+    apps.fomento.gob.es/boletinonline2/sedal/35103500.XLS
+
+Trae los municipios de más de 25.000 habitantes, separando vivienda de hasta
+cinco años de antigüedad y de más — de modo que, con el año de construcción del
+Catastro, se usa el tramo que corresponde en lugar de la media de los dos.
+
+Ese Excel no lleva códigos INE, sólo nombres escritos a su manera («Ejido (El)»,
+«Santa Cruz deTenerife» sin espacio). El cruce se hace normalizando el nombre
+contra el listado del propio ministerio, que sí lleva código: el 95 % encaja
+directo y el resto con una tabla de equivalencias explícita. Cada valor cruzado
+se contrasta después con el de su provincia y, si se sale de una banda razonable,
+**se descarta**: un dato menos cuesta menos que un precio de otro sitio.
+
+**302 municipios** con precio propio. Los demás siguen con el de su provincia, y
+la respuesta lo dice en `precio_es_municipal`.
+
 ### La otra mitad: hacia dónde va
 
 El nivel del alquiler no es público, pero **su evolución sí**. El INE publica el
@@ -246,7 +275,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 184 comprobaciones
+./venv/bin/python tests/test_motor.py      # 198 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
@@ -265,7 +294,7 @@ verifican que las tablas siguen existiendo con el mismo identificador.
 | API | FastAPI + Uvicorn |
 | Fuentes | BOE (HTML) · Catastro (JSON) · Ministerio de Vivienda (CSV: alquiler municipal, valor tasado) · INE (CSV: Atlas de renta, IPVA, IPV) · Fianzas de Cataluña (API) · Banco de España · OpenStreetMap |
 | Cálculo | Sistema francés de amortización, ITP por comunidad |
-| Valoración | Valor tasado oficial × superficie del Catastro. Sin modelo: no hay microdatos de transacciones recientes en abierto |
+| Valoración | Valor tasado oficial del municipio × superficie del Catastro. Sin modelo: no hay microdatos de transacciones recientes en abierto |
 
 ## Los datos caducan: cómo se mantiene esto vivo
 

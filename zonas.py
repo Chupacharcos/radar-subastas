@@ -14,10 +14,11 @@ existen datos publicados, y con cuatro fuentes oficiales:
     la Agencia Tributaria, con su horquilla P25-P75 y su superficie mediana. En
     Cataluña se prefiere el alquiler de los contratos nuevos, que es lo que
     cobraría de verdad quien compre hoy.
-  - **Precio de compra**: valor tasado oficial en €/m². Sólo llega a **provincia**,
-    de modo que todos los municipios comparten precio y hay que leer el orden con
-    esa advertencia: dice dónde el alquiler es más alto en relación con lo que
-    cuesta comprar *en la provincia*, no dónde la vivienda es más barata.
+  - **Precio de compra**: valor tasado oficial en €/m² **de cada municipio**. La
+    media provincial se queda corta en las capitales y se pasa en la periferia
+    —Madrid capital 5.466 €/m² frente a Móstoles 3.026, con una media provincial
+    de 4.048 que no describe a ninguno—, así que sólo se usa para los municipios
+    de menos de 25.000 habitantes, que son los que el ministerio no desglosa.
   - **Renta del hogar** (INE, Atlas), que da el esfuerzo del inquilino. Esta
     métrica es ahora enteramente real: alquiler medido dividido por renta medida.
   - **Evolución del alquiler** (INE, IPVA), que dice hacia dónde va cada uno.
@@ -75,6 +76,8 @@ class Municipio:
     alquiler_anio: int
     horquilla_municipio: dict
     viviendas_alquiladas: int | None
+    precio_m2_compra: float
+    precio_es_municipal: bool
     precio_vivienda: float
     cuota_hipoteca_mensual: float
     rentabilidad_bruta: float
@@ -159,8 +162,8 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
                              avisos=[f"El ministerio no publica alquileres de ningún "
                                      f"municipio de {nombre_provincia}."])
 
-    precio_vivienda = precio.euros_m2 * superficie
     rentas = _renta_de(cp)
+    precios_municipales = precio_compra.municipios_con_precio()
 
     municipios: list[Municipio] = []
     for m in crudos[:limite]:
@@ -169,6 +172,13 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
         importe, origen = alquiler_real.alquiler_estimado_de(m["codigo_ine"], superficie)
         if not importe:
             continue
+
+        # El precio del municipio manda sobre el de la provincia. La media
+        # provincial se queda corta en las capitales y se pasa en la periferia:
+        # Madrid capital está a 5.466 €/m² y Móstoles a 3.026, con una media
+        # provincial de 4.048 que no describe a ninguno de los dos.
+        euros_m2 = precios_municipales.get(m["codigo_ine"])
+        precio_vivienda = (euros_m2 or precio.euros_m2) * superficie
 
         a = analizar(precio_vivienda, importe, nombre_provincia, s)
         renta = rentas.get(m["codigo_ine"])
@@ -183,6 +193,8 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
             alquiler_anio=origen["anio"],
             horquilla_municipio=origen["horquilla_municipio"],
             viviendas_alquiladas=m.get("viviendas"),
+            precio_m2_compra=round(euros_m2 or precio.euros_m2, 2),
+            precio_es_municipal=euros_m2 is not None,
             precio_vivienda=round(precio_vivienda, 2),
             cuota_hipoteca_mensual=a.cuota_mensual,
             rentabilidad_bruta=a.rentabilidad_bruta,
@@ -201,12 +213,11 @@ def analizar_zonas(provincia: str = "madrid", superficie: int = SUPERFICIE_TIPO,
         "Todas las cifras de alquiler y renta son datos publicados, no estimaciones: "
         "el alquiler procede de los arrendamientos declarados a la Agencia Tributaria "
         "y la renta del Atlas del INE.",
-        f"El precio de compra es el MISMO para todos los municipios: "
-        f"{euros(precio.euros_m2)} €/m² tasados de media en la provincia de "
-        f"{nombre_provincia} ({precio.anio}T{precio.trimestre}). El ministerio no lo "
-        "publica por municipio. Léelo así: el orden dice dónde el alquiler es más alto "
-        "en relación con lo que cuesta comprar en la provincia, no dónde la vivienda "
-        "es más barata.",
+        f"El precio de compra es el valor tasado oficial de CADA municipio "
+        f"({precio.anio}T{precio.trimestre}), no una media provincial. Donde el "
+        f"ministerio no lo publica —municipios de menos de 25.000 habitantes— se usa "
+        f"el de la provincia de {nombre_provincia} ({euros(precio.euros_m2)} €/m²) y la "
+        "fila lo indica con `precio_es_municipal`.",
         f"Se comparan los {len(municipios)} municipios con más viviendas alquiladas de "
         "la provincia, que son sobre los que el dato es más sólido.",
     ]

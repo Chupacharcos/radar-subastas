@@ -415,6 +415,50 @@ check(p.anio >= 2025, f"el dato es reciente, no de 2018 ({p.anio})")
 check(p.variacion_anual_pct is not None, "trae la variación del último año")
 check(precio_provincia("99").error is not None, "provincia inexistente da error")
 
+print("\n=== 23b) Valor tasado POR MUNICIPIO (Excel del BoletínOnline) ===")
+from precio_compra import municipios_con_precio, precio_municipio
+
+mad = precio_municipio("28079")
+check(mad.error is None and mad.euros_m2 > 3000,
+      f"Madrid capital: {mad.euros_m2} €/m² ({mad.periodo})")
+check(mad.euros_m2 > p.euros_m2,
+      f"la capital está por encima de su provincia ({mad.euros_m2} > {p.euros_m2}), "
+      "que es justo lo que la media provincial ocultaba")
+mos = precio_municipio("28092")
+check(mos.euros_m2 < p.euros_m2, f"y Móstoles por debajo ({mos.euros_m2})")
+check(mad.euros_m2_mas_5_anios and mad.euros_m2_hasta_5_anios,
+      "trae los dos tramos de antigüedad")
+check(precio_municipio("28001").error is not None,
+      "un municipio de menos de 25.000 habitantes explica por qué no está")
+
+todos = municipios_con_precio()
+check(len(todos) > 250, f"{len(todos)} municipios emparejados a su código INE")
+check(all(len(c) == 5 and c.isdigit() for c in todos), "todos con código INE de 5 dígitos")
+
+# El emparejamiento es por nombre normalizado: si se rompiera, saldrían precios
+# de otra provincia. La banda de plausibilidad es la red de seguridad.
+from precio_compra import BANDA_PLAUSIBLE, _carga
+prov = _carga()
+raros = []
+for cod, valor in todos.items():
+    serie = prov.get(cod[:2], {}).get("serie", {})
+    if not serie:
+        continue
+    ref = serie[max(serie, key=lambda k: tuple(int(x) for x in k.split("-")))]
+    if not BANDA_PLAUSIBLE[0] <= valor / ref <= BANDA_PLAUSIBLE[1]:
+        raros.append((cod, valor, ref))
+check(not raros, f"ningún municipio se sale de la banda respecto a su provincia ({len(raros)})")
+
+# Con el año de construcción se usa el tramo que toca, no la media de los dos.
+nueva = valorar_por_superficie("28", 100, "28079", 2024)
+vieja = valorar_por_superficie("28", 100, "28079", 1970)
+check(nueva.valor_referencia > vieja.valor_referencia,
+      "una vivienda nueva se valora por encima de una de más de cinco años")
+check(nueva.ambito == "municipio", "y declara que el ámbito es municipal")
+check(valorar_por_superficie("28", 100, "28001").ambito == "provincia",
+      "sin dato municipal cae a la provincia y lo dice")
+
+
 v = valorar_por_superficie("28", 100)
 check(abs(v.valor_referencia - p.euros_m2 * 100) < 1, "valor = €/m² × superficie")
 check(any("PROVINCIAL" in a for a in v.avisos),
@@ -470,8 +514,12 @@ rents = [m["rentabilidad_neta"] for m in z.municipios]
 check(rents == sorted(rents, reverse=True), "vienen ordenados por rentabilidad neta")
 check(len({m["alquiler_m2_mes"] for m in z.municipios}) > 3,
       "el alquiler varía de verdad entre municipios, que era el problema de fondo")
-check(any("MISMO para todos" in a for a in z.avisos),
-      "avisa de que el precio de compra es provincial")
+check(any(m["precio_es_municipal"] for m in z.municipios),
+      "el precio de compra es el del municipio, no una media provincial")
+check(len({m["precio_m2_compra"] for m in z.municipios}) > 3,
+      "y varía de verdad entre municipios")
+check(any("no una media provincial" in a for a in z.avisos),
+      "el aviso explica de dónde sale el precio y cuándo cae a la provincia")
 check(z.precio_compra_provincial["anio"] >= 2025, "con el precio del trimestre en curso")
 check(analizar_zonas("Provincia Falsa").total_municipios == 0,
       "una provincia inexistente devuelve vacío con explicación")

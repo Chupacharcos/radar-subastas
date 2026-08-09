@@ -222,6 +222,25 @@ def comprobar() -> list[Comprobacion]:
                 "Valor tasado de la vivienda (ministerio)", "ok",
                 f"{datos['provincias']} provincias, último trimestre {datos['ultimo_periodo']}.",
             ))
+            # El detalle municipal es la fuente más frágil del proyecto: un .XLS
+            # en un portal heredado, cruzado por nombre. Si el cruce se degrada
+            # —porque el ministerio renombre municipios— hay que enterarse.
+            muni = datos.get("municipal") or {}
+            if muni.get("error"):
+                resultados.append(Comprobacion(
+                    "Valor tasado por municipio", "caducado",
+                    f"No se pudo leer {muni['origen']}: {muni['error']}. Es un Excel de "
+                    "formato heredado; comprueba si ha cambiado de ruta o de estructura.",
+                ))
+            else:
+                pocos = muni.get("municipios", 0) < 200
+                resultados.append(Comprobacion(
+                    "Valor tasado por municipio", "revisar" if pocos else "ok",
+                    f"{muni.get('municipios')} municipios cruzados con su código INE, "
+                    f"último trimestre {muni.get('ultimo_periodo')}."
+                    + (" Son menos de los esperados: el cruce por nombre puede haberse "
+                       "degradado." if pocos else ""),
+                ))
     except Exception as e:
         resultados.append(Comprobacion("Valor tasado de la vivienda (ministerio)",
                                        "caducado", f"No se pudo comprobar: {type(e).__name__}."))

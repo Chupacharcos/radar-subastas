@@ -103,9 +103,10 @@ def valorar(subasta: dict, inmueble: dict, alquiler_usuario: float | None = None
     avisos: list[str] = []
     superficie = inmueble.get("superficie_m2")
     valor_subasta = subasta.get("valor_subasta")
-    provincia, _ = _codigos_ine(inmueble)
+    provincia, municipio = _codigos_ine(inmueble)
 
-    referencia = precio_compra.valorar_por_superficie(provincia or "", superficie)
+    referencia = precio_compra.valorar_por_superficie(
+        provincia or "", superficie, municipio, inmueble.get("anio_construccion"))
     if referencia.error:
         avisos.append(f"Sin valor de referencia: {referencia.error}")
     else:
