@@ -329,33 +329,22 @@ check(any("índices, no precios" in a for a in cmp.avisos),
       "y de que son índices, no niveles en €")
 
 
-print("\n=== 21) De barrio a distrito censal ===")
+print("\n=== 21) Nombres de distrito censal ===")
 import distritos as dist
 
 check(dist.municipio_de("madrid") == "28079", "Madrid resuelve a su código INE")
-check(dist.municipio_de("Valencia") is None, "una ciudad sin verificar no resuelve")
-
-sal = dist.distrito_de("madrid", "Salamanca")
-check(sal["codigo"] == "2807904" and sal["nombre"] == "Salamanca", "Salamanca → distrito 04")
-check(sal["el_barrio_es_parte_del_distrito"] is False,
-      "el barrio que se llama como su distrito no se marca como parte de él")
-
-mal = dist.distrito_de("madrid", "Malasaña")
-check(mal["codigo"] == "2807901", "Malasaña cae en Centro")
-check(mal["el_barrio_es_parte_del_distrito"] is True, "y se declara que es sólo una parte")
-check(dist.distrito_de("madrid", "Lavapiés")["codigo"] == mal["codigo"],
-      "Lavapiés comparte distrito con Malasaña")
-
-# Los nombres con signos y acentos son los que rompen los emparejamientos.
-check(dist.distrito_de("barcelona", "Poblenou (22@)")["codigo"] == "0801910",
-      "«Poblenou (22@)» encuentra su distrito pese a los signos")
-check(dist.distrito_de("barcelona", "Gràcia")["codigo"] == "0801906", "«Gràcia» con acento")
-check(dist.distrito_de("madrid", "Barrio Inventado") is None,
-      "un barrio desconocido devuelve None en lugar de asignarlo a ojo")
-check(dist.distrito_de("valencia", "Ruzafa") is None,
-      "y una ciudad sin verificar no asigna distritos")
-check(all(c in dist.NOMBRES for m in dist.BARRIO_A_DISTRITO.values() for c in m.values()),
-      "todo distrito del mapa de barrios tiene nombre oficial")
+check(dist.municipio_de("Málaga") == "29067", "y Málaga con acento")
+check(dist.municipio_de("Zaragoza") is None,
+      "Zaragoza NO está: su numeración no supera el contraste con la renta")
+check(dist.nombre_distrito("2807904") == "Salamanca", "2807904 es Salamanca")
+check(dist.nombre_distrito("5029708") == "5029708",
+      "un distrito sin verificar devuelve su código, no un nombre inventado")
+check(len(dist.ciudades_con_distrito()) == 5, "cinco ciudades verificadas")
+check(all(len(c) == 7 and c.isdigit() for c in dist.NOMBRES),
+      "todos los códigos son de 7 dígitos")
+# Cada nombre debe pertenecer a una ciudad declarada: si no, sobra.
+check(all(c[:5] in dist.MUNICIPIO.values() for c in dist.NOMBRES),
+      "ningún nombre pertenece a una ciudad que no esté en el mapa")
 
 
 print("\n=== 22) Alquiler REAL por municipio (ministerio + fianzas) ===")
@@ -529,8 +518,51 @@ check(d["disponible"] and len(d["distritos"]) == 21, "Madrid trae sus 21 distrit
 check(all("renta_hogar_anual" in f for f in d["distritos"]), "con la renta de cada uno")
 check("no bajan de municipio" in d["aviso"],
       "y explica por qué ahí no hay alquiler ni precio")
-check(contexto_distritos("valencia")["disponible"] is False,
-      "una ciudad sin verificar no inventa distritos")
+check(contexto_distritos("zaragoza")["disponible"] is False,
+      "Zaragoza no inventa distritos: su numeración no supera el contraste")
+val = contexto_distritos("valencia")
+check(val["disponible"] and len(val["distritos"]) == 19,
+      f"Valencia trae sus 19 distritos ({len(val.get('distritos', []))})")
+check(val["distritos"][0]["nombre"] == "El Pla del Real",
+      f"y el de mayor renta es El Pla del Real ({val['distritos'][0]['nombre']})")
+sev = contexto_distritos("sevilla")
+check(sev["distritos"][0]["nombre"] == "Los Remedios",
+      f"en Sevilla, Los Remedios ({sev['distritos'][0]['nombre']})")
+check(sev["distritos"][-1]["nombre"] == "Cerro-Amate",
+      f"y abajo Cerro-Amate ({sev['distritos'][-1]['nombre']})")
+
+
+print("\n=== 26) El mapa provincia → tabla del INE apunta donde debe ===")
+import re as _re
+import httpx as _httpx
+from renta_ine import CSV_URL, TABLA_POR_PROVINCIA
+
+check(len(TABLA_POR_PROVINCIA) == 52, f"las 52 provincias mapeadas ({len(TABLA_POR_PROVINCIA)})")
+check(len(set(TABLA_POR_PROVINCIA.values())) == 52,
+      "sin tablas repetidas: dos provincias no pueden salir del mismo fichero")
+
+# Este es el test que faltaba. El mapa se había construido sondeando y estaba mal
+# en 35 de 51 provincias; no daba cifras falsas, pero dejaba a casi toda España
+# sin renta en silencio. Sobrevivió porque sólo se probaban Madrid y Barcelona.
+# Se comprueba una muestra repartida, leyendo el principio del CSV real.
+def _provincia_real(tabla):
+    with _httpx.stream("GET", CSV_URL.format(tabla=tabla), timeout=60,
+                       follow_redirects=True) as r:
+        r.raise_for_status()
+        buf = b""
+        for trozo in r.iter_bytes():
+            buf += trozo
+            if len(buf) > 90_000:
+                break
+    m = _re.search(r"\n(\d{5}) ", buf.decode("utf-8-sig", "ignore"))
+    return m.group(1)[:2] if m else None
+
+for _cp in ("08", "28", "29", "41", "46", "50"):
+    try:
+        _real = _provincia_real(TABLA_POR_PROVINCIA[_cp])
+        check(_real == _cp, f"la tabla de la provincia {_cp} contiene la provincia {_real}")
+    except Exception as e:
+        check(False, f"no se pudo comprobar la provincia {_cp}: {type(e).__name__}")
 
 
 print(f"\n{'='*54}")

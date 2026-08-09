@@ -12,8 +12,11 @@ cambia un barrio: dos calles separadas pueden tener 15.000 € de diferencia.
 
 Sobre el acceso: la API JSON del INE rechaza estas tablas por volumen
 ("No puede mostrarse por restricciones de volumen"), así que se usa la descarga
-CSV oficial, que sí funciona. Cada provincia es una tabla distinta; el mapa
-`TABLA_POR_PROVINCIA` se construyó sondeando las 54 tablas de la operación 353.
+CSV oficial, que sí funciona. Cada provincia es una tabla distinta y las 540 de
+la operación 353 se llaman todas igual, así que `TABLA_POR_PROVINCIA` se resolvió
+leyendo qué provincia contiene cada fichero, una por una. El test 26 lo vigila:
+la versión anterior de ese mapa estaba mal en 35 de 51 provincias y nadie se
+enteró, porque Madrid y Barcelona sí eran correctas.
 
 Los ficheros pesan decenas de MB, de modo que se descargan bajo demanda, se
 destilan a lo mínimo útil y se cachea el resultado.
@@ -52,20 +55,29 @@ MAX_BYTES = 200 * 1024 * 1024
 # Versión del destilado. Al subirla, las cachés viejas se ignoran y se vuelven a
 # generar: si no, un fichero anterior sin distritos se daría por bueno para
 # siempre.
-FORMATO = 2
+FORMATO = 3
 
 # Código INE de provincia → tabla del Atlas de renta (operación 353).
-# Sondeado el 2026-08-08 leyendo la cabecera de cada CSV.
+# **Verificado tabla por tabla el 2026-08-09**, no sondeado: la operación tiene
+# 540 tablas y todas se llaman igual («Indicadores de renta media y mediana»),
+# así que el nombre no sirve para identificarlas. Se resolvió leyendo la cabecera
+# y la primera fila de cada una para ver qué provincia contiene de verdad.
+#
+# El mapa anterior estaba mal en 35 de 51 provincias. No producía cifras falsas
+# —al emparejar por código INE, un municipio de otra provincia simplemente no
+# aparece— pero dejaba sin renta a casi toda España en silencio. Sobrevivió
+# porque Madrid y Barcelona sí eran correctas y eran las únicas que se probaban.
+# El test 26 lo comprueba ahora contra el CSV real.
 TABLA_POR_PROVINCIA = {
-    "01": 30824, "02": 30833, "03": 30842, "04": 30851, "05": 30860, "06": 30869,
-    "07": 30878, "08": 30896, "09": 30905, "10": 30914, "11": 30923, "12": 30932,
-    "13": 30941, "14": 30950, "15": 30959, "16": 30968, "17": 30977, "18": 30986,
-    "19": 30995, "20": 31004, "21": 31013, "22": 31022, "23": 31031, "24": 31040,
-    "25": 31049, "26": 31058, "27": 31067, "28": 31097, "29": 31106, "30": 31115,
-    "31": 31124, "32": 31133, "33": 31142, "34": 31151, "35": 31160, "36": 31169,
-    "37": 31178, "38": 31187, "39": 31196, "41": 31205, "42": 31214, "43": 31223,
-    "44": 31232, "45": 31241, "46": 31250, "47": 31259, "48": 31268, "49": 31277,
-    "50": 31286, "51": 31295, "52": 31304,
+    "01": 30824, "02": 30656, "03": 30833, "04": 30842, "05": 30869, "06": 30878,
+    "07": 30887, "08": 30896, "09": 30926, "10": 30935, "11": 30944, "12": 30962,
+    "13": 30971, "14": 30980, "15": 30989, "16": 30998, "17": 31016, "18": 31025,
+    "19": 31034, "20": 31007, "21": 31043, "22": 31052, "23": 31061, "24": 31070,
+    "25": 31079, "26": 31169, "27": 31088, "28": 31097, "29": 31106, "30": 31115,
+    "31": 31124, "32": 31133, "33": 30860, "34": 31142, "35": 31151, "36": 31160,
+    "37": 31178, "38": 31187, "39": 30953, "40": 31196, "41": 31205, "42": 31214,
+    "43": 31223, "44": 31232, "45": 31241, "46": 31250, "47": 31259, "48": 30917,
+    "49": 31268, "50": 31277, "51": 31286, "52": 31295,
 }
 
 

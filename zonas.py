@@ -291,7 +291,7 @@ def contexto_distritos(ciudad: str) -> dict:
         t = alquiler_ine.tendencia_alquiler_distrito(cod)
         filas.append({
             "codigo": cod,
-            "nombre": distritos_ine.NOMBRES.get(cod, cod),
+            "nombre": distritos_ine.nombre_distrito(cod),
             "renta_hogar_anual": (renta or {}).get("renta_hogar_anual"),
             "alquiler_var_anual_pct": None if t.error else t.variacion_anual_pct,
             "alquiler_desde_2015_pct": None if t.error else t.acumulada_desde_base_pct,

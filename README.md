@@ -275,7 +275,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 198 comprobaciones
+./venv/bin/python tests/test_motor.py      # 205 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
@@ -368,10 +368,19 @@ La media del municipio es demasiado gruesa para eso, así que se baja de grano:
 
 - **Por distrito censal.** En Madrid capital va de 79.274 € en Chamartín a
   32.666 € en Puente de Vallecas. La media del municipio, 49.916 €, no describe a
-  ninguno de los dos. El INE publica sus distritos numerados y sin nombre, así que
-  la correspondencia con los barrios se verificó cruzando esa renta con el orden
-  socioeconómico conocido de cada ciudad; sólo están **Madrid y Barcelona**,
-  porque son las dos que se pudieron comprobar así.
+  ninguno de los dos. El INE publica sus distritos numerados y **sin nombre**, así
+  que la correspondencia se verificó cruzando esa renta con el orden
+  socioeconómico conocido de cada ciudad, arriba y abajo: Madrid, Barcelona,
+  Valencia (06 El Pla del Real 61.479 € / 18 Pobles de l'Oest 32.233 €), Sevilla
+  (11 Los Remedios 56.389 € / 04 Cerro-Amate 26.160 €) y Málaga (02 Este
+  57.109 € / 06 Cruz de Humilladero 30.570 €).
+
+  **Zaragoza se quedó fuera a propósito.** Tiene 12 distritos en el Atlas, tantos
+  como distritos urbanos tiene la ciudad, así que era fácil darla por buena. Pero
+  el contraste falla: el 08 —Oliver-Valdefierro en la numeración municipal, de los
+  más humildes— sale cuarto por renta, y el 12 —Casablanca, de los más
+  acomodados— a mitad de tabla. Sin saber si el INE numera distinto o si sus
+  distritos no son los del ayuntamiento, poner nombres sería inventar.
 - **Por sección censal**, en forma de horquilla. Las 2.450 secciones de Madrid
   van de 17.450 € a 104.774 €. Las secciones enteras no se guardan porque sin la
   cartografía del seccionado no se sabe en qué sección cae una dirección, pero la
@@ -381,6 +390,15 @@ La media del municipio es demasiado gruesa para eso, así que se baja de grano:
 > secciones de Madrid publican exactamente 104.774 €, que es un techo, no un
 > máximo real. El destilado lo detecta y lo marca como `maximo_censurado`, para
 > no presentar un tope como si fuera un dato.
+
+> **Un fallo que estuvo escondido meses.** El mapa que dice qué tabla del INE
+> corresponde a cada provincia se había construido sondeando, y estaba **mal en 35
+> de las 51 provincias**: la de Zaragoza devolvía Ceuta. No producía cifras falsas
+> —al emparejar por código INE, un municipio de otra provincia simplemente no
+> aparece— pero dejaba sin renta a casi toda España **en silencio**. Sobrevivió
+> porque Madrid y Barcelona sí eran correctas, y eran las únicas que los tests
+> comprobaban. Ahora el mapa está resuelto tabla por tabla y hay un test que abre
+> el CSV real de una muestra de provincias y verifica que contiene lo que dice.
 
 La API JSON del INE rechaza estas tablas por volumen, así que se usa la descarga
 CSV oficial: se baja una vez por provincia, se destila a lo mínimo útil y se
