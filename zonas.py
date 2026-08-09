@@ -32,6 +32,7 @@ conserva el desglose por distrito censal en lo que sí está medido a ese grano
 """
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, asdict, field
 from statistics import median
 
@@ -61,11 +62,24 @@ PROVINCIAS = {
     "47": "Valladolid", "48": "Bizkaia", "49": "Zamora", "50": "Zaragoza",
     "51": "Ceuta", "52": "Melilla",
 }
-_POR_NOMBRE = {n.lower(): c for c, n in PROVINCIAS.items()}
-_ALIAS = {"vizcaya": "48", "guipuzcoa": "20", "la coruña": "15", "coruña": "15",
-          "gerona": "17", "lerida": "25", "lérida": "25", "islas baleares": "07",
-          "alacant": "03", "valència": "46", "castello": "12", "castelló": "12",
-          "araba": "01", "tenerife": "38", "rioja": "26"}
+
+
+def _sin_tildes(texto: str) -> str:
+    """«Málaga» y «malaga» acaban igual. El selector de la demo manda el nombre
+    sin tildes, y sin esto la opción Málaga devolvía una tabla vacía en silencio."""
+    return "".join(c for c in unicodedata.normalize("NFD", (texto or "").strip().lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+_POR_NOMBRE = {_sin_tildes(n): c for c, n in PROVINCIAS.items()}
+_ALIAS = {_sin_tildes(k): v for k, v in {
+    "vizcaya": "48", "guipuzcoa": "20", "la coruña": "15", "coruña": "15",
+    "gerona": "17", "lerida": "25", "lérida": "25", "islas baleares": "07",
+    "alacant": "03", "valència": "46", "castello": "12", "castelló": "12",
+    "araba": "01", "tenerife": "38", "rioja": "26", "guipúzcoa": "20",
+    "a coruña": "15", "la rioja": "26", "baleares": "07", "illes balears": "07",
+    "las palmas": "35", "palmas": "35", "santa cruz": "38",
+}.items()}
 
 
 @dataclass
@@ -117,7 +131,7 @@ class AnalisisZonas:
 
 def codigo_de_provincia(provincia: str) -> str | None:
     """Acepta el código INE de dos dígitos o el nombre, con sus variantes."""
-    p = (provincia or "").strip().lower()
+    p = _sin_tildes(provincia)
     if p.zfill(2) in PROVINCIAS:
         return p.zfill(2)
     return _POR_NOMBRE.get(p) or _ALIAS.get(p)

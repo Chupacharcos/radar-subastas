@@ -516,12 +516,27 @@ check(propio.alquiler_mensual == 1500 and propio.alquiler_ambito == "inmueble",
 
 
 print("\n=== 25) Comparación de municipios (sin un solo dato inventado) ===")
-from zonas import analizar_zonas, codigo_de_provincia, contexto_distritos
+from zonas import PROVINCIAS, analizar_zonas, codigo_de_provincia, contexto_distritos
 
 check(codigo_de_provincia("Madrid") == "28" and codigo_de_provincia("28") == "28",
       "la provincia se acepta por nombre y por código")
 check(codigo_de_provincia("vizcaya") == "48", "y por su nombre alternativo")
 check(codigo_de_provincia("Ciudad Inventada") is None, "una provincia falsa no cuela")
+
+# El selector de la demo manda el nombre SIN TILDES: «malaga» devolvía una tabla
+# vacía en silencio, y sólo se vio probando la URL pública con el servicio
+# dormido. Se comprueban las 52 en todas las formas en que pueden llegar.
+import unicodedata as _ud
+def _sin_tildes_test(t):
+    return "".join(c for c in _ud.normalize("NFD", t.lower()) if _ud.category(c) != "Mn")
+
+_fallos_prov = [(c, v) for c, n in PROVINCIAS.items()
+                for v in (n, n.lower(), n.upper(), _sin_tildes_test(n), c)
+                if codigo_de_provincia(v) != c]
+check(not _fallos_prov,
+      f"las 52 provincias se reconocen con y sin tildes, en mayúsculas y por código ({_fallos_prov[:3]})")
+check(codigo_de_provincia("malaga") == "29" and codigo_de_provincia("Málaga") == "29",
+      "«malaga» y «Málaga» llevan al mismo sitio")
 
 z = analizar_zonas("madrid", limite=12)
 check(z.total_municipios > 5, f"{z.total_municipios} municipios comparados")
