@@ -22,6 +22,34 @@ municipio concreto.
 **Licencia:** MIT (ver [LICENSE](LICENSE)) — uso libre, incluido comercial,
 manteniendo el aviso de copyright. Sin garantía ni soporte incluidos.
 
+<!-- LOOP-MAP:START (generado por `php artisan project:loop readme` — no editar a mano) -->
+
+## El bucle que cierra
+
+<p align="center"><img src="https://adrianmoreno-dev.com/bucle/radar-subastas.svg" alt="Mapa del bucle de Radar de Subastas" width="900"></p>
+
+**Para** quien busca oportunidades en subastas judiciales · **Cada vez que sale una subasta**
+
+| Etapa | Qué pasa | Quién |
+|---|---|---|
+| **1. Disparador** | Encuentro una subasta judicial en el BOE y quiero saber si es una oportunidad. | persona |
+| **2. Acción** | Cruza el anuncio con Catastro, el valor de referencia y el alquiler oficial del municipio, y calcula la rentabilidad neta. | software |
+| **3. Medición** | El descuento sobre el valor de referencia, el alquiler del municipio, el riesgo y si se paga solo. | software |
+| **4. Decisión** | Decido si pujo, si necesito más entrada o si el alquiler no da para los gastos. | persona |
+
+### Lo que no hace
+
+- No sustituye a un asesor legal: no interpreta la ley ni valora la situación jurídica del inmueble.
+- No consulta el Registro: solo ve las cargas que menciona el propio anuncio del BOE, no las demás.
+- No predice el mercado: proyecta con series históricas del INE, no con previsiones de precios.
+
+### Por qué está construido así
+
+- **Rentabilidad neta** en vez de rentabilidad bruta — La bruta es un número de escaparate. Aquí se descuentan gastos, impuestos y lo que no se financia el día de la firma.
+- **Solo fuentes oficiales** en vez de portales inmobiliarios privados — Las subastas judiciales no se anuncian en los portales, y el alquiler por municipio solo existe en el dato del ministerio.
+
+<!-- LOOP-MAP:END -->
+
 ## Qué hace
 
 ```
