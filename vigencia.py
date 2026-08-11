@@ -104,7 +104,7 @@ def comprobar() -> list[Comprobacion]:
     try:
         from boe_client import BoeClient
         with BoeClient(delay=0) as c:
-            ids = c.buscar("madrid", limite=3)
+            ids = c.buscar("madrid", limite=6)
             if not ids:
                 resultados.append(Comprobacion(
                     "Portal de Subastas del BOE", "revisar",
@@ -112,17 +112,43 @@ def comprobar() -> list[Comprobacion]:
                     "que el portal haya cambiado su HTML.",
                 ))
             else:
-                s = c.detalle(ids[0])
-                if s.campos_ausentes:
+                # Se prueban varias, no la primera. El buscador cuela
+                # identificadores de la Agencia Tributaria cuya ficha no existe,
+                # y sondear sólo la primera daba por roto el portal entero
+                # dependiendo de qué subasta cayera arriba ese día.
+                buenas, muertas, rotas = 0, 0, []
+                for identificador in ids:
+                    s = c.detalle(identificador)
+                    if s.campos_ausentes == ["ficha_inexistente"]:
+                        muertas += 1
+                    elif s.campos_ausentes:
+                        rotas.append((identificador, s.campos_ausentes))
+                    else:
+                        buenas += 1
+
+                cola = (f" {muertas} identificador(es) del listado no tienen ficha, "
+                        "que es normal en las subastas de la Agencia Tributaria."
+                        if muertas else "")
+                if buenas:
+                    resultados.append(Comprobacion(
+                        "Portal de Subastas del BOE", "ok",
+                        f"Extracción correcta sobre {buenas} de {len(ids)} subastas."
+                        + cola,
+                    ))
+                elif rotas:
+                    campos = ", ".join(sorted({c for _, cs in rotas for c in cs}))
                     resultados.append(Comprobacion(
                         "Portal de Subastas del BOE", "caducado",
-                        f"Faltan campos al extraer una subasta ({', '.join(s.campos_ausentes)}). "
-                        f"El portal probablemente ha cambiado de maquetación.",
+                        f"Ninguna de las {len(ids)} subastas de prueba se pudo extraer; "
+                        f"faltan {campos}. El portal probablemente ha cambiado de "
+                        "maquetación.",
                     ))
                 else:
                     resultados.append(Comprobacion(
-                        "Portal de Subastas del BOE", "ok",
-                        f"Extracción correcta sobre {len(ids)} subastas de prueba.",
+                        "Portal de Subastas del BOE", "revisar",
+                        f"Las {len(ids)} subastas del listado no tienen ficha. Puede "
+                        "ser una racha de subastas de la Agencia Tributaria, o que el "
+                        "buscador haya cambiado el formato de sus identificadores.",
                     ))
     except Exception as e:
         resultados.append(Comprobacion(

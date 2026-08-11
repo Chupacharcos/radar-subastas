@@ -152,8 +152,21 @@ class BoeClient:
         return list(dict.fromkeys(re.findall(r"SUB-[A-Z]{2}-\d{4}-\d+", doc)))[:limite]
 
     def detalle(self, identificador: str) -> Subasta:
-        """Ficha completa: datos económicos + bien asociado."""
-        general = _pares_tabla(self._get(f"{BASE}/detalleSubasta.php?idSub={identificador}"))
+        """Ficha completa: datos económicos + bien asociado.
+
+        Hay identificadores que aparecen en el listado pero cuya ficha no
+        existe: el buscador devuelve subastas de la Agencia Tributaria como
+        `SUB-AT-2026-25` y su detalle responde «La subasta no existe». Eso no es
+        un cambio de maquetación, es un identificador muerto, y conviene
+        distinguirlo: si no, un monitor que sondee la primera subasta de la
+        lista puede dar por roto el portal entero.
+        """
+        html = self._get(f"{BASE}/detalleSubasta.php?idSub={identificador}")
+        if "no existe" in html.lower():
+            s = Subasta(identificador=identificador)
+            s.campos_ausentes = ["ficha_inexistente"]
+            return s
+        general = _pares_tabla(html)
         # ver=3 es la pestaña de bienes, donde está la referencia catastral.
         bien = _pares_tabla(self._get(f"{BASE}/detalleSubasta.php?idSub={identificador}&ver=3"))
 

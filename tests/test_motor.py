@@ -764,6 +764,32 @@ check(any("no es un fallo del cálculo" in a for a in solos["avisos"]),
       "y se explica que salgan pocos")
 
 
+print("\n=== 32) Identificadores del BOE cuya ficha no existe ===")
+from boe_client import Subasta as _Sub
+
+# El buscador cuela subastas de la Agencia Tributaria («SUB-AT-2026-25») cuyo
+# detalle responde «La subasta no existe». Eso NO es un cambio de maquetación, y
+# confundirlo daba una falsa alarma que declaraba roto el portal entero según qué
+# subasta cayera primera ese día. La distinción se marca explícitamente.
+_muerta = _Sub(identificador="SUB-AT-2026-25")
+_muerta.campos_ausentes = ["ficha_inexistente"]
+check(_muerta.campos_ausentes == ["ficha_inexistente"],
+      "una ficha inexistente se marca con su propio código, no como campos sueltos")
+
+import inspect as _insp
+import boe_client as _bc
+_fuente = _insp.getsource(_bc.BoeClient.detalle)
+check("no existe" in _fuente and "ficha_inexistente" in _fuente,
+      "el cliente detecta la página de error del portal antes de intentar parsearla")
+
+import vigencia as _vig
+_fuente_v = _insp.getsource(_vig.comprobar)
+check("ficha_inexistente" in _fuente_v,
+      "y la comprobación de vigencia distingue ese caso del portal roto")
+check("limite=6" in _fuente_v,
+      "sondeando varias subastas en lugar de fiarlo todo a la primera")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

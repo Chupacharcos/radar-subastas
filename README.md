@@ -341,7 +341,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 267 comprobaciones
+./venv/bin/python tests/test_motor.py      # 271 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
