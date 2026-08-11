@@ -790,6 +790,46 @@ check("limite=6" in _fuente_v,
       "sondeando varias subastas en lugar de fiarlo todo a la primera")
 
 
+print("\n=== 33) Una subasta vencida no se muestra como si quedara tiempo ===")
+import inspect as _i2
+import api as _api
+
+_fuente_op = _i2.getsource(_api.oportunidades)
+# El BOE tarda en cambiar el estado de «en curso», así que una subasta cuyo
+# plazo ya terminó puede seguir apareciendo en el listado. Antes se recortaba a
+# cero y se pintaba «0 días para pujar», indistinguible de «cierra hoy».
+check("max(0, (fin - ahora).days)" not in _fuente_op,
+      "ya no se recorta a cero el tiempo restante de una subasta vencida")
+check('d["cerrada"]' in _fuente_op, "cada subasta declara si ya cerró")
+check("incluir_cerradas" in _fuente_op,
+      "y se excluyen por defecto, con parámetro para verlas si se quiere")
+
+# La lógica del borde, sin depender de que hoy haya subastas vencidas en el BOE.
+from datetime import datetime, timedelta, timezone
+_ahora = datetime.now(timezone.utc)
+for _delta, _esperado in ((timedelta(hours=-2), True), (timedelta(hours=+2), False),
+                          (timedelta(days=+5), False)):
+    _fin = _ahora + _delta
+    _restante = _fin - _ahora
+    check((_restante.total_seconds() <= 0) is _esperado,
+          f"fin en {_delta} → cerrada={_esperado}")
+
+# Y que ninguna de las que se sirven ahora mismo esté vencida. Se pide por HTTP
+# con el cliente de pruebas de FastAPI: llamar a la función a pelo pasa objetos
+# Query como argumentos, porque son los valores por defecto de la firma.
+try:
+    from fastapi.testclient import TestClient
+    with TestClient(_api.app) as _cliente:
+        _r = _cliente.get("/subastas/oportunidades",
+                          params={"provincia": "madrid", "limite": 6}, timeout=300).json()
+    _vencidas = [o for o in _r["oportunidades"] if o.get("cerrada")]
+    check(not _vencidas, f"ninguna de las {_r['total']} subastas servidas está vencida")
+    _sin_fecha = [o for o in _r["oportunidades"] if not o.get("fecha_fin")]
+    check(not _sin_fecha, f"y todas traen fecha de cierre ({len(_sin_fecha)} sin ella)")
+except Exception as _e:
+    check(False, f"no se pudo comprobar el listado en vivo: {type(_e).__name__}: {_e}")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

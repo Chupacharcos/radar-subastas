@@ -164,6 +164,8 @@ def oportunidades(provincia: str = Query("madrid"), limite: int = Query(12, ge=1
                   precio_max: float = Query(None, description="Descarta lo que no puedas pagar"),
                   entrada_max: float = Query(None, description="Capital del que dispones"),
                   riesgo_max: int = Query(None, ge=0, le=100),
+                  incluir_cerradas: bool = Query(False,
+                      description="El BOE tarda en marcar como cerradas las que ya vencieron"),
                   solo_analizables: bool = Query(True)):
     """Subastas ya valoradas y ordenadas por oportunidad.
 
@@ -219,18 +221,33 @@ def oportunidades(provincia: str = Query("madrid"), limite: int = Query(12, ge=1
             d["capital_necesario_estimado"] = None
 
         # Días hasta el cierre: en subastas la urgencia es parte de la decisión.
+        # Y si ya cerró, hay que decirlo: el BOE tarda en cambiar el estado de
+        # «en curso», así que una subasta terminada puede seguir apareciendo en
+        # el listado. Antes se recortaba a cero y se mostraba «0 días para
+        # pujar», que es indistinguible de «cierra hoy» e invita a actuar sobre
+        # algo que ya no se puede pujar.
         d["dias_para_cierre"] = None
+        d["cerrada"] = False
         if s.fecha_fin:
             from datetime import datetime, timezone
             try:
                 fin = datetime.fromisoformat(s.fecha_fin)
                 ahora = datetime.now(fin.tzinfo or timezone.utc)
-                d["dias_para_cierre"] = max(0, (fin - ahora).days)
+                restante = fin - ahora
+                d["cerrada"] = restante.total_seconds() <= 0
+                d["dias_para_cierre"] = None if d["cerrada"] else max(0, restante.days)
+                if d["cerrada"]:
+                    d["motivo_no_analizable"] = (
+                        f"el plazo terminó el {s.fecha_fin[:10]}; el portal del BOE "
+                        "todavía la lista como en curso")
+                    d["analizable"] = False
             except ValueError:
                 pass
 
         resultados.append(d)
 
+    if not incluir_cerradas:
+        resultados = [r for r in resultados if not r["cerrada"]]
     if solo_analizables:
         resultados = [r for r in resultados if r["analizable"]]
     if precio_max:
@@ -253,7 +270,8 @@ def oportunidades(provincia: str = Query("madrid"), limite: int = Query(12, ge=1
         "provincia": provincia,
         "total": len(resultados),
         "filtros": {"precio_max": precio_max, "entrada_max": entrada_max,
-                    "riesgo_max": riesgo_max, "solo_analizables": solo_analizables},
+                    "riesgo_max": riesgo_max, "solo_analizables": solo_analizables,
+                    "incluir_cerradas": incluir_cerradas},
         "oportunidades": resultados,
         "orden": "menor riesgo y menor precio por m² primero",
         "fuente": "Portal de Subastas del BOE + Catastro",
