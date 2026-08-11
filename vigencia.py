@@ -287,6 +287,40 @@ def comprobar() -> list[Comprobacion]:
         resultados.append(Comprobacion("Valor tasado de la vivienda (ministerio)",
                                        "caducado", f"No se pudo comprobar: {type(e).__name__}."))
 
+    # 8. Edad de las cachés. Las fuentes se destilan una vez y se guardan en
+    #    disco; si nadie las vuelve a bajar, la herramienta serviría el trimestre
+    #    anterior para siempre. Esto no descarga nada: sólo mide y avisa, porque
+    #    una consulta de usuario no debe esperar a 37 MB.
+    try:
+        from refresco import estado as estado_cache
+        estados = estado_cache()
+        caducadas = [e for e in estados if e.caducada]
+        nunca = [e for e in estados if e.error and e.dias is None]
+        if caducadas:
+            resultados.append(Comprobacion(
+                "Frescura de las cachés", "caducado",
+                f"{len(caducadas)} de {len(estados)} han pasado su plazo "
+                f"({', '.join(e.nombre for e in caducadas[:3])}"
+                f"{'…' if len(caducadas) > 3 else ''}). "
+                "Ejecuta `python refresco.py --refrescar`.",
+            ))
+        elif nunca:
+            resultados.append(Comprobacion(
+                "Frescura de las cachés", "revisar",
+                f"{len(nunca)} fuente(s) sin descargar todavía; se bajarán en la "
+                "primera consulta que las necesite.",
+            ))
+        else:
+            mayor = max((e.dias for e in estados if e.dias is not None), default=0)
+            resultados.append(Comprobacion(
+                "Frescura de las cachés", "ok",
+                f"Las {len(estados)} cachés dentro de plazo; la más antigua "
+                f"tiene {mayor} días.",
+            ))
+    except Exception as e:
+        resultados.append(Comprobacion("Frescura de las cachés", "revisar",
+                                       f"No se pudo comprobar: {type(e).__name__}."))
+
     return resultados
 
 

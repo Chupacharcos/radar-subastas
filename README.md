@@ -369,7 +369,7 @@ son una ayuda, no un sustituto del asesoramiento profesional.
 python -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/uvicorn api:app --host 127.0.0.1 --port 8010
 
-./venv/bin/python tests/test_motor.py      # 279 comprobaciones
+./venv/bin/python tests/test_motor.py      # 287 comprobaciones
 ```
 
 El BOE y el Catastro no se prueban aquí: un test que dependa de que haya
@@ -404,6 +404,7 @@ un error: la calculadora seguiría devolviendo cifras con total aplomo.
 | HTML del portal del BOE | Sin aviso | Cada extracción declara `campos_ausentes`; `vigencia.py` lo comprueba contra el portal real |
 | Fichero de alquiler del ministerio | Una vez al año, y **no está catalogado** | `vigencia.py` lo descarga en cada pasada; si deja de responder lo marca caducado, porque es la única fuente pública del nivel del alquiler |
 | Valor tasado de la vivienda | Cada trimestre | `vigencia.py` comprueba el último trimestre publicado |
+| **Edad de las propias cachés** | — | Las fuentes se destilan una vez y se guardan en disco, así que sin vigilancia se serviría el trimestre anterior para siempre. `refresco.py` mide la edad de cada una con el plazo de su fuente (40 días las trimestrales, 100 las anuales) y `vigencia.py` lo comprueba en cada pasada. El refresco va fuera de banda: una consulta de usuario no espera a 37 MB |
 | Índices del INE (renta, IPVA, IPV) | Una vez al año | `vigencia.py` avisa si el último año publicado se queda más de dos ejercicios atrás: sería señal de que la tabla cambió de identificador o de que la operación dejó de publicarse |
 
 ```bash

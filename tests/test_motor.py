@@ -830,6 +830,31 @@ except Exception as _e:
     check(False, f"no se pudo comprobar el listado en vivo: {type(_e).__name__}: {_e}")
 
 
+print("\n=== 34) Las cachés caducan y alguien lo mira ===")
+import refresco as _refr
+
+_est = _refr.estado()
+check(len(_est) > 8, f"{len(_est)} cachés vigiladas")
+check(all(e.limite in (_refr.TRIMESTRAL, _refr.ANUAL) for e in _est),
+      "cada una con el plazo de su fuente: trimestral o anual")
+check(any(e.limite == _refr.TRIMESTRAL for e in _est)
+      and any(e.limite == _refr.ANUAL for e in _est),
+      "y hay de los dos tipos, no un plazo único para todo")
+check(all(e.dias is None or e.dias >= 0 for e in _est), "las edades son coherentes")
+check(not [e for e in _est if e.caducada],
+      f"ninguna caducada ahora mismo ({[e.nombre for e in _est if e.caducada]})")
+
+# La comprobación tiene que estar enganchada, no sólo existir suelta.
+check("refresco" in _insp.getsource(_vig.comprobar),
+      "vigencia.py mira la edad de las cachés en cada pasada")
+
+# Refrescar no debe formar parte de una petición de usuario: son cientos de MB.
+_fuente_refr = _insp.getsource(_refr.refrescar)
+check("forzar=True" in _fuente_refr, "el refresco fuerza la descarga de verdad")
+check(_refr.refrescar.__doc__ and "fuera de una petición" in _refr.refrescar.__doc__,
+      "y está documentado que va fuera de banda")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")
