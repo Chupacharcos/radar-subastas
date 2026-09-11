@@ -126,13 +126,14 @@ También calcula el **precio máximo** que puedes pagar sin que el cash-flow se
 vuelva negativo. Con 900 €/mes de alquiler en Madrid: 188.289 €. Por encima de
 esa cifra, cada mes pones dinero.
 
-## Endpoints (17)
+## Endpoints (18)
 
 ```
 GET  /subastas/buscar?provincia=madrid&limite=10   Subastas de inmuebles en curso
 POST /subastas/analizar                            Análisis completo de una subasta
 POST /subastas/calculadora                         Rentabilidad de cualquier operación
 GET  /subastas/se-pagan-solos?entrada_pct=0.3      Dónde en España se paga solo
+GET  /subastas/se-pagan-solos.csv                  Lo mismo en CSV, con supuestos y fuentes
 GET  /subastas/zonas?provincia=madrid              Municipios comparados como inversión
 GET  /subastas/distritos?ciudad=madrid             Renta y alquiler por distrito censal
 GET  /subastas/alquiler?codigo_municipio=28079     Evolución del alquiler frente al precio
@@ -174,6 +175,17 @@ procede de fuentes públicas reutilizables.
 Sobre el BOE: no ofrece API, así que se lee su HTML público, sólo las páginas
 que sirve sin registro y a ritmo de lectura humana (1,2 s entre peticiones). No
 se puja, no se accede a nada tras autenticación y no se descarga masivamente.
+
+### Llevarse el resultado
+
+`GET /subastas/se-pagan-solos.csv` devuelve la misma respuesta en CSV. La
+cabecera del fichero incluye los **supuestos** del cálculo (entrada, tipo,
+plazo, vacancia), los **avisos** que matizan qué significa «se paga solo» y la
+**fuente oficial de cada dato**.
+
+Va así a propósito: una tabla de cifras sin ese contexto se malinterpreta sola,
+y además deja constancia de que el dato procede de organismos públicos y no de
+una estimación propia. El cálculo es reproducible con el CSV y este repositorio.
 
 ### Qué es dato y qué es estimación
 

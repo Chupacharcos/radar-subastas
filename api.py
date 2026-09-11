@@ -17,6 +17,7 @@ import os
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -143,6 +144,69 @@ def municipios_que_se_pagan_solos(
         interes_anual = tipo_hipotecario_estimado(diferencial)["tipo_estimado"]
     s = Supuestos(entrada_pct=entrada_pct, interes_anual=interes_anual, anios_hipoteca=anios)
     return se_pagan_solos(superficie, s, limite)
+
+
+@app.get("/subastas/se-pagan-solos.csv")
+def municipios_que_se_pagan_solos_csv(
+        superficie: int = Query(80, ge=25, le=400),
+        entrada_pct: float = Query(0.30, ge=0.0, le=1.0),
+        interes_anual: float = Query(None, ge=0.0, le=0.2),
+        anios: int = Query(25, ge=5, le=40),
+        diferencial: float = Query(None, ge=0.0, le=0.05),
+        limite: int = Query(200, ge=5, le=3400)):
+    """El mismo resultado, en CSV, para poder llevárselo.
+
+    Hasta ahora la respuesta se veía en pantalla y ahí se quedaba. Quien quiera
+    comprobar el cálculo, cruzarlo con lo suyo o citarlo no tenía forma de
+    sacarlo, y es justo lo que hace útil —y citable— una herramienta de datos.
+
+    El fichero lleva cabecera con los SUPUESTOS y las FUENTES: fuera de la
+    pantalla que los explica, una tabla de cifras sin contexto se malinterpreta
+    sola. Y deja constancia de que el dato es de organismos públicos, no mío.
+    """
+    import csv as _csv
+    import io as _io
+    from datetime import datetime as _dt
+
+    datos = municipios_que_se_pagan_solos(
+        superficie=superficie, entrada_pct=entrada_pct,
+        interes_anual=interes_anual, anios=anios,
+        diferencial=diferencial, limite=limite)
+
+    filas = datos.get("municipios") or []
+    buf = _io.StringIO()
+
+    sup = datos.get("supuestos") or {}
+    buf.write(f"# Municipios de Espana donde una vivienda tipo se paga sola\n")
+    buf.write(f"# Generado: {_dt.now().isoformat(timespec='seconds')}\n")
+    buf.write(f"# Herramienta: https://adrianmoreno-dev.com/demo/radar-subastas\n")
+    buf.write(f"# Superficie tipo: {datos.get('superficie_tipo', superficie)} m2\n")
+    for k, v in sup.items():
+        buf.write(f"# Supuesto {k}: {v}\n")
+    for aviso in (datos.get("avisos") or []):
+        buf.write(f"# Aviso: {aviso}\n")
+    fuentes = datos.get("fuentes") or {}
+    if isinstance(fuentes, dict):
+        for clave, desc in fuentes.items():
+            buf.write(f"# Fuente ({clave}): {desc}\n")
+    else:
+        for fuente in fuentes:
+            buf.write(f"# Fuente: {fuente}\n")
+    buf.write(f"# Total de municipios que cumplen: {datos.get('total', len(filas))}"
+              f" (este fichero trae {len(filas)})\n")
+    buf.write("#\n")
+
+    if filas:
+        w = _csv.DictWriter(buf, fieldnames=list(filas[0].keys()), extrasaction="ignore")
+        w.writeheader()
+        w.writerows(filas)
+
+    nombre = f"se-pagan-solos-{superficie}m2-entrada{int(entrada_pct*100)}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
 
 
 @app.get("/subastas/distritos")

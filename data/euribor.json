@@ -1,7 +1,7 @@
 {
-  "valor": 0.02884,
-  "fecha_dato": "2026-08-06",
-  "obtenido": "2026-08-09T08:04:20+00:00",
+  "valor": 0.03138,
+  "fecha_dato": "2026-09-09",
+  "obtenido": "2026-09-10T15:29:05+00:00",
   "fuente": "Banco de España, serie ti_1_7.7 (Euríbor a 12 meses)",
   "es_estimacion": false,
   "aviso": ""
