@@ -976,6 +976,59 @@ check(not _salta(52), "con las mismas 52 se deja pasar")
 check(not _salta(54), "y si la fuente amplía cobertura, también")
 
 
+# ── Un hipo del Catastro no puede apagar la alarma, una caída sí ──────────────
+# Su servidor falla ~1 de cada 6 sondas incluso con reintentos. Si eso tumbaba
+# el veredicto, el chequeo semanal avisaba en falso y las alertas de verdad se
+# pierden entre el ruido. Se distingue por cuánto llevamos sin una respuesta
+# buena: menos de 24 h es «intermitente» (se ve, pero no rompe); más, «caducado».
+print("\n── Catastro intermitente vs caído ──")
+
+import datetime as _dt
+import json as _js
+import vigencia as _vig
+import catastro as _cat
+
+_marca = _vig._MARCA_CATASTRO
+_copia = _marca.read_text() if _marca.exists() else None
+_consultar_real = _vig.consultar if hasattr(_vig, "consultar") else None
+
+
+def _con_sonda_rota(horas_desde_ok):
+    _marca.write_text(_js.dumps({"ok": (_dt.datetime.now(_dt.timezone.utc)
+                                        - _dt.timedelta(hours=horas_desde_ok)
+                                        ).isoformat(timespec="seconds")}))
+    fallo = lambda rc: _cat.Inmueble(referencia_catastral=rc, error="Server disconnected")
+    _cat_real = _cat.consultar
+    _cat.consultar = fallo
+    _vig.consultar = fallo
+    try:
+        return next(c for c in _vig.comprobar() if "Catastro" in c.dato)
+    finally:
+        _cat.consultar = _cat_real
+        if _consultar_real is not None:
+            _vig.consultar = _consultar_real
+
+
+try:
+    _c1 = _con_sonda_rota(2)
+    check(_c1.estado == "intermitente",
+          f"un fallo con respuesta buena hace 2 h es intermitente ({_c1.estado})")
+    _c2 = _con_sonda_rota(30)
+    check(_c2.estado == "caducado",
+          f"30 h sin respuesta buena es caducado ({_c2.estado})")
+    check("intermitente" not in ("ok",), "el estado intermitente existe y es distinto de ok")
+finally:
+    if _copia is not None:
+        _marca.write_text(_copia)
+    elif _marca.exists():
+        _marca.unlink()
+
+# Y el veredicto del endpoint sólo lo tumba lo accionable.
+_fuente_api = (Path(__file__).resolve().parent.parent / "api.py").read_text()
+check('c["estado"] not in ("ok", "intermitente")' in _fuente_api,
+      "todo_ok ignora los fallos intermitentes de terceros")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

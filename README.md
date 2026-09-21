@@ -467,6 +467,13 @@ reintento, quien buscara dos inmuebles seguidos se llevaba un error en el
 segundo. El cliente reintenta dos veces con espera corta; un `4xx` no se
 reintenta, porque es determinista.
 
+Aun con reintentos falla ~1 de cada 6 sondas, así que la verificación distingue
+dos cosas distintas: si el Catastro no responde pero sí lo hizo en las últimas
+24 h, el estado es **`intermitente`** —se ve en la lista, pero no tumba
+`todo_ok`—; si lleva más de un día mudo, es `caducado` y sí lo tumba. Un hipo de
+un servicio ajeno no es un problema de esta herramienta, y si el ruido apaga la
+alarma, la alarma deja de servir.
+
 ### Correcciones ya aplicadas por esta verificación
 
 La primera versión llevaba tipos escritos de memoria. Al contrastarlos:

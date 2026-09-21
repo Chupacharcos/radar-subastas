@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from datetime import datetime, timezone
 
 import impuestos
@@ -34,7 +35,7 @@ MAX_DIAS_TIPO = 30
 @dataclass
 class Comprobacion:
     dato: str
-    estado: str          # "ok" | "revisar" | "caducado"
+    estado: str          # "ok" | "intermitente" | "revisar" | "caducado"
     detalle: str
     dias: int | None = None
 
@@ -50,6 +51,54 @@ def _dias_desde(fecha_iso: str) -> int | None:
         return (datetime.now(timezone.utc) - f).days
     except Exception:
         return None
+
+
+# Cuánto puede llevar el Catastro sin darnos una respuesta buena antes de que
+# deje de ser «un hipo suyo» y pase a ser algo que mirar.
+MAX_HORAS_CATASTRO_MUDO = 24
+_MARCA_CATASTRO = Path(__file__).parent / "data" / "ultima_sonda_catastro.json"
+
+
+def _lee_marca() -> dict:
+    try:
+        return json.loads(_MARCA_CATASTRO.read_text())
+    except Exception:
+        return {}
+
+
+def _escribe_marca(datos: dict) -> None:
+    try:
+        _MARCA_CATASTRO.parent.mkdir(parents=True, exist_ok=True)
+        _MARCA_CATASTRO.write_text(json.dumps(datos))
+    except Exception:
+        pass        # la marca es una ayuda, no una dependencia
+
+
+def _marca_catastro_ok() -> None:
+    _escribe_marca({"ok": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+
+
+def _horas_sin_catastro() -> float:
+    """Horas desde la última respuesta buena del Catastro.
+
+    Si no hay constancia de ninguna (primera vez que se sonda, o marca perdida),
+    se empieza a contar desde ESTE fallo en lugar de dar por caída una fuente de
+    la que no sabemos nada: así el primer hipo no dispara la alarma, pero una
+    caída sostenida sí acaba saliendo a las 24 h.
+    """
+    marca = _lee_marca()
+    referencia = marca.get("ok") or marca.get("primer_fallo")
+    if not referencia:
+        ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _escribe_marca({**marca, "primer_fallo": ahora})
+        return 0.0
+    try:
+        cuando = datetime.fromisoformat(referencia)
+        if cuando.tzinfo is None:
+            cuando = cuando.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - cuando).total_seconds() / 3600
+    except Exception:
+        return 0.0
 
 
 def comprobar() -> list[Comprobacion]:
@@ -157,23 +206,47 @@ def comprobar() -> list[Comprobacion]:
         ))
 
     # 5. Catastro: que la API pública siga respondiendo igual.
+    #
+    # Su servidor falla de forma intermitente (~1 de cada 6 sondas, incluso con
+    # reintentos: corta la conexión cuando le llegan consultas seguidas). Un
+    # hipo suyo NO es un problema de esta herramienta, así que no tumba el
+    # veredicto: se distingue por cuánto llevamos sin una respuesta buena. Si
+    # pasa de un día, entonces sí hay algo que mirar. Sin esta distinción el
+    # chequeo semanal avisaba en falso y las alertas de verdad se pierden entre
+    # el ruido. (2026-09-21)
     try:
         from catastro import consultar
         # Referencia real usada como sonda; si deja de resolver, algo cambió.
         i = consultar("2951517VK2825S0001TB")
         if i.error or not i.superficie_m2:
-            resultados.append(Comprobacion(
-                "API del Catastro", "caducado",
-                f"La consulta de prueba no devolvió datos usables: {i.error or 'sin superficie'}.",
-            ))
+            horas = _horas_sin_catastro()
+            if horas < MAX_HORAS_CATASTRO_MUDO:
+                cuanto = ("aún no hay constancia de una respuesta buena"
+                          if horas < 0.05 else
+                          f"la última buena fue hace {horas:.1f} h")
+                resultados.append(Comprobacion(
+                    "API del Catastro", "intermitente",
+                    f"No ha respondido a esta sonda; {cuanto}. Su servidor corta "
+                    f"conexiones a ratos y los datos que ya tenemos no dependen "
+                    f"de esta llamada.",
+                ))
+            else:
+                resultados.append(Comprobacion(
+                    "API del Catastro", "caducado",
+                    f"Lleva {horas:.0f} h sin responder. Último motivo: "
+                    f"{i.error or 'sin superficie'}.",
+                ))
         else:
+            _marca_catastro_ok()
             resultados.append(Comprobacion(
                 "API del Catastro", "ok",
                 f"Responde correctamente ({i.superficie_m2} m², {i.anio_construccion}).",
             ))
     except Exception as e:
+        estado = ("intermitente" if _horas_sin_catastro() < MAX_HORAS_CATASTRO_MUDO
+                  else "caducado")
         resultados.append(Comprobacion(
-            "API del Catastro", "caducado", f"No se pudo consultar: {type(e).__name__}.",
+            "API del Catastro", estado, f"No se pudo consultar: {type(e).__name__}.",
         ))
 
     # 6. Índices del INE: son anuales, así que lo que hay que vigilar no es que

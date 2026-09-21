@@ -475,9 +475,14 @@ def vigencia():
     BCE y las dos fuentes externas. Pensado para engancharlo a un monitor."""
     from vigencia import comprobar
     resultados = [c.to_dict() for c in comprobar()]
+    # Un fallo intermitente de un servicio ajeno (el Catastro corta conexiones
+    # a ratos) no tumba el veredicto: aparece en la lista, para que se vea, pero
+    # `todo_ok` responde a lo que hay que ARREGLAR aquí. Si el ruido apaga la
+    # alarma, la alarma deja de servir. (2026-09-21)
+    accionables = [c for c in resultados if c["estado"] not in ("ok", "intermitente")]
     return {
         "comprobaciones": resultados,
-        "todo_ok": all(c["estado"] == "ok" for c in resultados),
+        "todo_ok": not accionables,
     }
 
 
