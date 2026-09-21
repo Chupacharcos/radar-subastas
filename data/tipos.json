@@ -1,7 +1,7 @@
 {
-  "valor": 0.0265,
-  "fecha_dato": "2026-08-14",
-  "obtenido": "2026-08-18T05:05:41+00:00",
+  "valor": 0.029,
+  "fecha_dato": "2026-09-18",
+  "obtenido": "2026-09-21T14:19:22+00:00",
   "fuente": "Banco de España, serie ti_1_1 (tipos de intervención del BCE)",
   "es_estimacion": false,
   "aviso": ""

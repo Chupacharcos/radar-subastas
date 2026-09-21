@@ -425,9 +425,47 @@ python vigencia.py --json   # para engancharlo a un monitor
 curl localhost:8010/subastas/vigencia
 ```
 
-Comprueba cinco cosas: antigüedad de la revisión de los tipos, que el tipo del
-BCE se descargue y sea reciente, que estén las 17 comunidades, que el portal del
-BOE siga sirviendo los campos esperados y que la API del Catastro responda.
+Comprueba catorce cosas: antigüedad de la revisión de los tipos, que el Euríbor
+se descargue y sea reciente, que estén las 17 comunidades, que el portal del BOE
+siga sirviendo los campos esperados, que la API del Catastro responda, las tablas
+del INE, el alquiler real por municipio, las fianzas de Cataluña y la Comunitat
+Valenciana, el valor tasado por provincia y por municipio, y la edad de las 27
+cachés.
+
+### Quién refresca las cachés
+
+Un temporizador de systemd, los lunes a las 04:45 UTC:
+
+```bash
+systemctl list-timers subastas-radar-refresco.timer
+sudo systemctl start subastas-radar-refresco.service   # a mano, si hace falta
+```
+
+Ejecuta `scripts/refrescar_caches.sh`, que descarga sólo lo caducado y
+**reinicia la API si algo cambió**: los módulos memorizan los datos en memoria,
+así que el proceso en marcha seguiría sirviendo las cifras viejas aunque el
+disco ya tenga las nuevas. Si no hay nada caducado, no toca nada.
+
+Hasta el 2026-09-21 no lo ejecutaba nadie: el medidor de edad y el chequeo
+existían, pero el refresco dependía de que alguien se acordara. Cuatro cachés
+llevaban 43 días con un plazo de 40, así que se servía el trimestre anterior.
+Y al refrescar por primera vez salieron dos fallos que el desuso tapaba:
+
+- **El ministerio dejó de publicar Madrid y Murcia como provincia.** Madrid pasó
+  a venir sólo como comunidad autónoma y Murcia, además, con el `CODAUTO` puesto
+  a `00` —el mismo que «Total nacional»—, así que sólo se la reconoce por el
+  nombre. El parser las descartaba: la provincia con más subastas del país se
+  quedaba sin precio de compra. Ahora se completan desde su comunidad todas las
+  uniprovinciales, y el dato provincial manda si existe.
+- **Un refresco podía empeorar los datos en silencio.** Si el fichero nuevo trae
+  menos territorios que el que ya había, se aborta y se conserva lo bueno: el
+  fallo sale a la luz en `/subastas/vigencia` en vez de degradar la herramienta.
+
+También se descubrió que **el Catastro corta la conexión** cuando le llegan dos
+consultas casi seguidas (`Server disconnected without sending a response`). Sin
+reintento, quien buscara dos inmuebles seguidos se llevaba un error en el
+segundo. El cliente reintenta dos veces con espera corta; un `4xx` no se
+reintenta, porque es determinista.
 
 ### Correcciones ya aplicadas por esta verificación
 

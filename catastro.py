@@ -13,6 +13,7 @@ https://ovc.catastro.meh.es/ovcservweb/ovcswlocalizacionrc/ovccallejero.asmx
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, asdict
 
 import httpx
@@ -66,6 +67,43 @@ def _buscar(datos, *claves):
     return None
 
 
+# El servidor del Catastro corta la conexión sin responder cuando le llegan dos
+# consultas casi seguidas ("Server disconnected without sending a response").
+# No es un error nuestro ni un dato inexistente: es su servidor cerrando el
+# socket. Sin reintento, una persona que buscara dos inmuebles seguidos se
+# llevaba un error en la segunda búsqueda, y el chequeo de /subastas/vigencia
+# daba la fuente por caducada. (2026-09-21)
+_ERRORES_TRANSITORIOS = (
+    httpx.RemoteProtocolError,   # cierra el socket sin responder
+    httpx.ReadError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+)
+_ESPERAS = (0.6, 1.8)   # dos reintentos; el tercero ya sería insistir de más
+
+
+def _get_con_reintentos(url: str, params: dict) -> dict:
+    """GET al Catastro tolerante a sus cortes de conexión. Devuelve el JSON."""
+    ultimo: Exception | None = None
+    for intento, espera in enumerate((*_ESPERAS, None)):
+        try:
+            resp = httpx.get(url, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return resp.json()
+        except _ERRORES_TRANSITORIOS as e:
+            ultimo = e
+        except httpx.HTTPStatusError as e:
+            # 5xx puede ser pasajero; un 4xx es determinista y no se reintenta.
+            if e.response.status_code < 500:
+                raise
+            ultimo = e
+        if espera is None:
+            break
+        time.sleep(espera)
+    raise ultimo if ultimo else RuntimeError("fallo desconocido consultando el Catastro")
+
+
 def consultar(referencia_catastral: str) -> Inmueble:
     """Datos físicos del inmueble a partir de su referencia catastral."""
     rc = re.sub(r"[^A-Z0-9]", "", (referencia_catastral or "").upper())
@@ -74,9 +112,7 @@ def consultar(referencia_catastral: str) -> Inmueble:
                         error="Referencia catastral incompleta (se esperan 14 o 20 caracteres)")
 
     try:
-        resp = httpx.get(f"{OVC}/Consulta_DNPRC", params={"RefCat": rc}, timeout=TIMEOUT)
-        resp.raise_for_status()
-        datos = resp.json()
+        datos = _get_con_reintentos(f"{OVC}/Consulta_DNPRC", {"RefCat": rc})
     except Exception as e:
         return Inmueble(referencia_catastral=rc, error=f"No se pudo consultar el Catastro: {e}")
 

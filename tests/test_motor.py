@@ -855,6 +855,127 @@ check(_refr.refrescar.__doc__ and "fuera de una petición" in _refr.refrescar.__
       "y está documentado que va fuera de banda")
 
 
+
+# ── El Catastro corta la conexión cuando le llegan consultas seguidas ─────────
+# El 2026-09-21 se comprobó que pedirle dos inmuebles con dos segundos de margen
+# devolvía "Server disconnected without sending a response" en la segunda. Sin
+# reintento, la persona que buscara dos subastas seguidas se llevaba un error, y
+# /subastas/vigencia daba la fuente por caducada. Se prueba con un corte
+# fingido: el test no depende de que el Catastro esté de buen humor.
+print("\n── Cliente del Catastro: tolerancia a sus cortes ──")
+
+import httpx as _httpx
+import catastro as _catastro
+
+_intentos = {"n": 0}
+_get_real = _httpx.get
+
+
+def _corta_la_primera(url, **kw):
+    _intentos["n"] += 1
+    if _intentos["n"] == 1:
+        raise _httpx.RemoteProtocolError("Server disconnected without sending a response.")
+    return _get_real(url, **kw)
+
+
+_httpx.get = _corta_la_primera
+try:
+    _r = _catastro.consultar("2951517VK2825S0001TB")
+    check(_intentos["n"] == 2, "un corte de conexión se reintenta una vez")
+    check(not _r.error, "y la consulta sale adelante en el reintento")
+finally:
+    _httpx.get = _get_real
+
+
+def _siempre_404(url, **kw):
+    _intentos["n"] += 1
+    _resp = _httpx.Response(404, request=_httpx.Request("GET", url))
+    raise _httpx.HTTPStatusError("404", request=_resp.request, response=_resp)
+
+
+_intentos["n"] = 0
+_httpx.get = _siempre_404
+try:
+    _catastro.consultar("2951517VK2825S0001TB")
+    check(_intentos["n"] == 1, "un 4xx NO se reintenta (es determinista)")
+finally:
+    _httpx.get = _get_real
+
+
+
+# ── Ninguna provincia se queda sin precio por cómo publique el ministerio ─────
+# El 2026-09-21, al refrescar la caché por primera vez (nadie la refrescaba),
+# Madrid y Murcia desaparecieron del fichero: el ministerio dejó de publicarlas
+# como provincia. Madrid pasó a venir sólo como comunidad y Murcia, además, con
+# el CODAUTO puesto a "00" —el mismo que «Total nacional»—, así que sólo se la
+# reconoce por el nombre. La provincia con más subastas del país se quedó sin
+# precio de compra. Se prueba con un CSV de mentira que imita esa forma.
+print("\n── Valor tasado: provincias publicadas sólo como comunidad ──")
+
+from precio_compra import _destila as _destila_csv
+
+_CSV_FALSO = "\n".join([
+    "Año;Trimestre;Valor;Régimen;CPRO;Provincia;Comunidad_Autónoma;CODAUTO",
+    # Barcelona sí viene como provincia
+    "2026;2;3204.2;Libre;08;Barcelona;Cataluña;09",
+    # Madrid, sólo como comunidad (CODAUTO correcto)
+    "2026;2;4089.6;Libre;;;Madrid, Comunidad de;13",
+    # Murcia, sólo como comunidad y con el CODAUTO mal
+    "2026;2;1350.1;Libre;;;Murcia, Region de;00",
+    # agregados que NO son provincias
+    "2026;2;1800.0;Libre;;;Total nacional;00",
+    "2026;2;1200.0;Libre;null;;Ceuta y Melilla;00",
+    # otro régimen: se ignora
+    "2026;2;999.9;Protegida;08;Barcelona;Cataluña;09",
+])
+
+_res = _destila_csv(_CSV_FALSO)
+check("08" in _res and _res["08"]["serie"].get("2026-2") == 3204.2,
+      "la provincia que viene como provincia se lee igual")
+check("28" in _res and _res["28"]["serie"].get("2026-2") == 4089.6,
+      "Madrid se rescata de su comunidad (CODAUTO 13)")
+check("30" in _res and _res["30"]["serie"].get("2026-2") == 1350.1,
+      "Murcia se rescata por el nombre, con el CODAUTO mal puesto")
+check(len(_res) == 3,
+      f"«Total nacional» y «Ceuta y Melilla» no cuelan como provincia ({len(_res)} entradas)")
+check(all(v != 999.9 for r in _res.values() for v in r["serie"].values()),
+      "la vivienda protegida no se mezcla con la libre")
+
+# Y el dato provincial manda sobre el de su comunidad, no al revés.
+_CSV_AMBOS = "\n".join([
+    "Año;Trimestre;Valor;Régimen;CPRO;Provincia;Comunidad_Autónoma;CODAUTO",
+    "2026;2;1798.5;Libre;33;Asturias;Asturias, Principado de;03",
+    "2026;2;1.0;Libre;;;Asturias, Principado de;03",
+])
+_res2 = _destila_csv(_CSV_AMBOS)
+check(_res2["33"]["serie"].get("2026-2") == 1798.5,
+      "si la provincia viene, no se sobrescribe con la de su comunidad")
+
+
+# Y el cinturón: un refresco no puede sustituir datos buenos por menos datos.
+print("\n── El refresco no puede degradar la caché ──")
+import json as _json
+import tempfile as _tmpf
+from pathlib import Path as _P
+from precio_compra import _no_empeorar as _guarda
+
+_falsa = _P(_tmpf.mkdtemp()) / "valor_tasado.json"
+_falsa.write_text(_json.dumps({"provincias": {f"{i:02d}": {} for i in range(1, 53)}}))
+
+
+def _salta(n):
+    try:
+        _guarda(_falsa, "provincias", {f"{i:02d}": {} for i in range(1, n + 1)}, "prueba")
+        return False
+    except ValueError:
+        return True
+
+
+check(_salta(50), "con 50 provincias frente a 52 se aborta el refresco")
+check(not _salta(52), "con las mismas 52 se deja pasar")
+check(not _salta(54), "y si la fuente amplía cobertura, también")
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")

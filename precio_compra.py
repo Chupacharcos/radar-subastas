@@ -157,42 +157,110 @@ def _num(valor: str) -> float | None:
         return None
 
 
-# El fichero no trae Navarra ni Asturias como provincia, sólo como comunidad
-# autónoma. Al ser uniprovinciales, la comunidad ES la provincia —mismo
-# territorio, mismo dato—, así que se toman de ahí en lugar de dejarlas sin
-# precio. Sin esto, la comparación de municipios devolvía cero en esas dos.
-CCAA_UNIPROVINCIAL = {"03": "33", "15": "31"}   # Asturias, Navarra
+# Las comunidades uniprovinciales aparecen unas veces con su CPRO y otras sólo
+# como comunidad. Al ser un único territorio, la comunidad ES la provincia
+# —mismo dato—, así que se rellenan desde ahí cuando la provincia no viene.
+#
+# 2026-09-21: antes sólo se contemplaban Asturias y Navarra, y el fichero dejó
+# de traer MADRID y MURCIA como provincia. Resultado: la provincia con más
+# subastas del país se quedaba sin precio de compra («La provincia 28 no aparece
+# en el fichero») en cuanto se refrescaba la caché. Murcia, además, llega con el
+# CODAUTO puesto a "00" —el mismo que «Total nacional» y «Ceuta y Melilla»—, así
+# que no se puede resolver por código: hay que reconocerla por el nombre.
+#
+# CPRO → (CODAUTO, fragmento del nombre de la comunidad)
+UNIPROVINCIALES = {
+    "33": ("03", "asturias"),
+    "07": ("04", "balear"),
+    "39": ("06", "cantabria"),
+    "28": ("13", "madrid"),
+    "30": ("14", "murcia"),
+    "31": ("15", "navarra"),
+    "26": ("17", "rioja"),
+}
 
 
 def _destila(contenido: str) -> dict:
-    """CSV → {codigo_provincia: {nombre, serie: {'2026-1': 4047.5, …}}}."""
+    """CSV → {codigo_provincia: {nombre, serie: {'2026-1': 4047.5, …}}}.
+
+    Dos pasadas: primero las filas de provincia y luego, sólo para las
+    uniprovinciales que no hayan aparecido, la fila de su comunidad. Así una
+    provincia nunca queda sin precio porque el ministerio cambie de criterio,
+    y tampoco se sobrescribe un dato provincial con el de su comunidad.
+    """
     out: dict[str, dict] = {}
+    comunidades: dict[str, dict] = {}        # nombre normalizado → {nombre, serie}
+
     for fila in csv.DictReader(io.StringIO(contenido), delimiter=";"):
         if (fila.get("Régimen") or "").strip() != REGIMEN:
             continue
         valor = _num(fila.get("Valor") or "")
         if valor is None:
             continue
-        cp = (fila.get("CPRO") or "").strip()
-        nombre = (fila.get("Provincia") or "").strip()
-        if not cp:
-            # Fila de comunidad autónoma: sólo interesa si es uniprovincial.
-            cp = CCAA_UNIPROVINCIAL.get((fila.get("CODAUTO") or "").strip().zfill(2))
-            if not cp:
-                continue
-            nombre = (fila.get("Comunidad_Autónoma") or "").strip()
-        # El fichero trae una fila agregada de «Ceuta y Melilla» con CPRO="null".
-        # Sin este filtro se colaba como si fuera una provincia más.
-        if not cp.isdigit():
-            continue
-        cp = cp.zfill(2)
         try:
             anio, trimestre = int(fila["Año"]), int(fila["Trimestre"])
         except (KeyError, ValueError):
             continue
-        reg = out.setdefault(cp, {"nombre": nombre, "serie": {}})
-        reg["serie"][f"{anio}-{trimestre}"] = valor
+        periodo = f"{anio}-{trimestre}"
+
+        cp = (fila.get("CPRO") or "").strip()
+        # El fichero trae filas agregadas («Ceuta y Melilla», «Total nacional»)
+        # con CPRO vacío o "null". Sin este filtro se colaban como provincias.
+        if cp.isdigit():
+            reg = out.setdefault(cp.zfill(2),
+                                 {"nombre": (fila.get("Provincia") or "").strip(),
+                                  "serie": {}})
+            reg["serie"][periodo] = valor
+            continue
+
+        nombre_ccaa = (fila.get("Comunidad_Autónoma") or "").strip()
+        if not nombre_ccaa:
+            continue
+        clave = _normaliza(nombre_ccaa)
+        reg = comunidades.setdefault(clave, {"nombre": nombre_ccaa,
+                                             "codauto": (fila.get("CODAUTO") or "").strip().zfill(2),
+                                             "serie": {}})
+        reg["serie"][periodo] = valor
+
+    # Segunda pasada: completar las uniprovinciales ausentes.
+    for cpro, (codauto, fragmento) in UNIPROVINCIALES.items():
+        if cpro in out:
+            continue
+        candidata = next(
+            (c for clave, c in comunidades.items()
+             if fragmento in clave or c["codauto"] == codauto),
+            None,
+        )
+        if candidata and candidata["serie"]:
+            out[cpro] = {"nombre": candidata["nombre"], "serie": candidata["serie"]}
+
     return out
+
+
+def _no_empeorar(destino: Path, clave: str, nuevo: dict, etiqueta: str) -> None:
+    """Impide que un refresco sustituya datos buenos por menos datos.
+
+    Nació de un caso real (2026-09-21): el ministerio dejó de publicar Madrid y
+    Murcia como provincia y el refresco sobrescribió la caché con 50 provincias
+    en lugar de 52. La herramienta se quedó respondiendo «La provincia 28 no
+    aparece en el fichero» para la provincia con más subastas del país, sin que
+    nada avisara. Si el fichero nuevo trae MENOS territorios que el que ya
+    teníamos, se aborta: se conserva lo bueno y el fallo sale a la luz en
+    /subastas/vigencia en vez de degradar los datos en silencio.
+    """
+    if not destino.exists():
+        return
+    try:
+        anterior = json.loads(destino.read_text(encoding="utf-8")).get(clave) or {}
+    except Exception:
+        return
+    if len(nuevo) < len(anterior):
+        ausentes = sorted(set(anterior) - set(nuevo))[:8]
+        raise ValueError(
+            f"El refresco de {etiqueta} traía {len(nuevo)} entradas frente a las "
+            f"{len(anterior)} que ya había (faltan {', '.join(ausentes)}). "
+            f"No se sobrescribe: revisa si la fuente ha cambiado de formato."
+        )
 
 
 def _carga(forzar: bool = False) -> dict:
@@ -214,6 +282,7 @@ def _carga(forzar: bool = False) -> dict:
     provincias = _destila(b"".join(trozos).decode("utf-8-sig", "ignore"))
     if not provincias:
         raise ValueError("El fichero de valor tasado no trajo ninguna provincia")
+    _no_empeorar(destino, "provincias", provincias, "valor tasado por provincia")
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     destino.write_text(json.dumps({
@@ -380,6 +449,8 @@ def _carga_municipal(forzar: bool = False) -> tuple[dict, str]:
     municipios, periodo = _lee_xls_municipal(b"".join(trozos))
     if not municipios:
         raise ValueError("El Excel municipal no trajo ningún municipio emparejado")
+
+    _no_empeorar(destino, "municipios", datos, "valor tasado por municipio")
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     destino.write_text(json.dumps({
