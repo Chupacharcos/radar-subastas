@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 data/cache/
 .env
+
+# Marca de la última sonda buena al Catastro: se reescribe en cada
+# comprobación de vigencia, así que versionarla solo genera ruido en los
+# diffs y commits automáticos sin contenido. Se regenera sola.
+data/ultima_sonda_catastro.json
