@@ -107,6 +107,27 @@ def _fecha_iso(valor: str) -> str | None:
     return f"{m.group(3)}-{m.group(2)}-{m.group(1)}T{m.group(4)}" if m else None
 
 
+_FICHA_INEXISTENTE = re.compile(r"La subasta \S+ no existe", re.I)
+
+
+_REF_CATASTRAL = re.compile(r"\b\d{7}[A-Z]{2}\d{4}[A-Z]\d{4}[A-Z]{2}\b")
+
+
+def _ref_en_texto(pares: dict[str, str]) -> str | None:
+    """Algunos juzgados no rellenan el campo y escriben la referencia dentro de
+    la descripción. Sólo se acepta si es única: hay fichas que la repiten con
+    una errata (…VK2816… y …BK2816…) y elegir una sería inventar."""
+    refs = set(_REF_CATASTRAL.findall(" ".join(pares.values()).upper()))
+    return refs.pop() if len(refs) == 1 else None
+
+
+def _campo(pares: dict[str, str], etiqueta: str) -> str:
+    """Búsqueda sin distinguir mayúsculas: la pestaña de lotes escribe «Valor
+    Subasta» donde la ficha general escribe «Valor subasta»."""
+    etiqueta = etiqueta.lower()
+    return next((v for k, v in pares.items() if k.lower() == etiqueta), "")
+
+
 def _pares_tabla(html_doc: str) -> dict[str, str]:
     """El portal maqueta los datos como <th>etiqueta</th><td>valor</td>."""
     pares = re.findall(r"<th[^>]*>(.*?)</th>\s*<td[^>]*>(.*?)</td>", html_doc, re.S)
@@ -162,7 +183,11 @@ class BoeClient:
         lista puede dar por roto el portal entero.
         """
         html = self._get(f"{BASE}/detalleSubasta.php?idSub={identificador}")
-        if "no existe" in html.lower():
+        # Se busca la frase de error completa, no «no existe» suelto: desde
+        # octubre de 2026 las subastas de pujas secretas llevan el aviso «…no
+        # existe posibilidad de prórroga», y esa coincidencia daba por muertas
+        # fichas válidas (el radar las devolvía vacías).
+        if _FICHA_INEXISTENTE.search(_texto(html)):
             s = Subasta(identificador=identificador)
             s.campos_ausentes = ["ficha_inexistente"]
             return s
@@ -170,19 +195,27 @@ class BoeClient:
         # ver=3 es la pestaña de bienes, donde está la referencia catastral.
         bien = _pares_tabla(self._get(f"{BASE}/detalleSubasta.php?idSub={identificador}&ver=3"))
 
+        def importe(etiqueta_general: str, etiqueta_lote: str) -> float | None:
+            # En las subastas por lotes la ficha general dice «Ver valor de
+            # subasta en cada lote» y la cifra está en la pestaña de bienes, que
+            # abre el primer lote. Como dirección y referencia catastral salen
+            # de esa misma pestaña, las cifras corresponden al mismo bien.
+            return _importe(general.get(etiqueta_general, "")) or _importe(
+                _campo(bien, etiqueta_lote))
+
         s = Subasta(
             identificador=identificador,
             tipo=general.get("Tipo de subasta"),
             fecha_inicio=_fecha_iso(general.get("Fecha de inicio", "")),
             fecha_fin=_fecha_iso(general.get("Fecha de conclusión", "")),
-            valor_subasta=_importe(general.get("Valor subasta", "")),
-            tasacion=_importe(general.get("Tasación", "")),
-            puja_minima=_importe(general.get("Puja mínima", "")),
-            deposito=_importe(general.get("Importe del depósito", "")),
-            tramo_pujas=_importe(general.get("Tramos entre pujas", "")),
+            valor_subasta=importe("Valor subasta", "Valor subasta"),
+            tasacion=importe("Tasación", "Valor de tasación"),
+            puja_minima=importe("Puja mínima", "Puja mínima"),
+            deposito=importe("Importe del depósito", "Importe del depósito"),
+            tramo_pujas=importe("Tramos entre pujas", "Tramos entre pujas"),
             cantidad_reclamada=_importe(general.get("Cantidad reclamada", "")),
             anuncio_boe=general.get("Anuncio BOE"),
-            referencia_catastral=bien.get("Referencia catastral"),
+            referencia_catastral=bien.get("Referencia catastral") or _ref_en_texto(bien),
             direccion=bien.get("Dirección"),
             codigo_postal=bien.get("Código Postal"),
             localidad=bien.get("Localidad"),

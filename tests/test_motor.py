@@ -790,6 +790,27 @@ check("limite=6" in _fuente_v,
       "sondeando varias subastas en lugar de fiarlo todo a la primera")
 
 
+print("\n=== 32b) Pujas secretas, subastas por lotes y referencia en texto ===")
+# Octubre de 2026: el BOE añadió «…no existe posibilidad de prórroga» a las
+# subastas de pujas secretas y el cliente las daba por inexistentes. Y en las
+# subastas por lotes la cifra sólo está en la pestaña del lote («Valor Subasta»).
+check(not _bc._FICHA_INEXISTENTE.search(
+          "ADVERTENCIA: todas las pujas son secretas y no existe posibilidad de prórroga"),
+      "el aviso de pujas secretas no hace pasar una ficha por inexistente")
+check(bool(_bc._FICHA_INEXISTENTE.search("ERROR: La subasta SUB-AT-2026-26 no existe.")),
+      "la página de error real sí se reconoce")
+check(_bc._campo({"Valor Subasta": "105.210,00 €"}, "Valor subasta") == "105.210,00 €",
+      "la etiqueta del lote se encuentra aunque cambie de mayúsculas")
+check(_bc._importe("Ver valor de subasta en cada lote") is None,
+      "la remisión al lote no se toma por una cifra")
+check(_bc._ref_en_texto({"Descripción": "VIVIENDA, REFERENCIA CATASTRAL 1461801VK2816S0227AD"})
+      == "1461801VK2816S0227AD",
+      "la referencia escrita en la descripción se recupera")
+check(_bc._ref_en_texto({"Descripción": "REF 1461801VK2816S0227AD",
+                         "Otra": "REF 1461801BK2816S0227AD"}) is None,
+      "con dos referencias distintas no se elige ninguna")
+
+
 print("\n=== 33) Una subasta vencida no se muestra como si quedara tiempo ===")
 import inspect as _i2
 import api as _api
