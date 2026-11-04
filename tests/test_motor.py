@@ -892,20 +892,26 @@ _intentos = {"n": 0}
 _get_real = _httpx.get
 
 
+# La segunda respuesta también es fingida: si iba al Catastro de verdad, un
+# segundo corte real (frecuente) suponía un tercer intento y el test fallaba
+# sin que el código hubiera cambiado.
 def _corta_la_primera(url, **kw):
     _intentos["n"] += 1
     if _intentos["n"] == 1:
         raise _httpx.RemoteProtocolError("Server disconnected without sending a response.")
-    return _get_real(url, **kw)
+    return _httpx.Response(200, json={"ok": True}, request=_httpx.Request("GET", url))
 
 
+_esperas_reales = _catastro._ESPERAS
+_catastro._ESPERAS = tuple(0 for _ in _esperas_reales)
 _httpx.get = _corta_la_primera
 try:
-    _r = _catastro.consultar("2951517VK2825S0001TB")
+    _r = _catastro._get_con_reintentos(f"{_catastro.OVC}/Consulta_DNPRC", {"RefCat": "x"})
     check(_intentos["n"] == 2, "un corte de conexión se reintenta una vez")
-    check(not _r.error, "y la consulta sale adelante en el reintento")
+    check(_r == {"ok": True}, "y la consulta sale adelante en el reintento")
 finally:
     _httpx.get = _get_real
+    _catastro._ESPERAS = _esperas_reales
 
 
 def _siempre_404(url, **kw):
