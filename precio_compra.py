@@ -450,7 +450,7 @@ def _carga_municipal(forzar: bool = False) -> tuple[dict, str]:
     if not municipios:
         raise ValueError("El Excel municipal no trajo ningún municipio emparejado")
 
-    _no_empeorar(destino, "municipios", datos, "valor tasado por municipio")
+    _no_empeorar(destino, "municipios", municipios, "valor tasado por municipio")
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     destino.write_text(json.dumps({

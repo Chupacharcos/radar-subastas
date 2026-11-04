@@ -1050,6 +1050,35 @@ check('c["estado"] not in ("ok", "intermitente")' in _fuente_api,
       "todo_ok ignora los fallos intermitentes de terceros")
 
 
+print("\n=== Refresco del valor tasado municipal (rama que sólo corre al caducar) ===")
+# 2026-11-02: la rama de descarga de `_carga_municipal` llamaba a
+# `_no_empeorar(..., datos, ...)` con una variable que no existía. Sólo se
+# ejecuta cuando la caché pasa su plazo, así que el NameError tardó seis
+# semanas en salir y dejó la caché caducada. Se recorre sin red.
+import tempfile as _tf
+import precio_compra as _pcm
+_orig = (_pcm.CACHE_DIR, _pcm.httpx.stream, _pcm._lee_xls_municipal)
+class _Resp:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def raise_for_status(self): pass
+    def iter_bytes(self): yield b"xls"
+try:
+    with _tf.TemporaryDirectory() as _d:
+        _pcm.CACHE_DIR = Path(_d)
+        _pcm.httpx.stream = lambda *a, **k: _Resp()
+        _pcm._lee_xls_municipal = lambda b: ({"28079": {"nombre": "Madrid", "euros_m2": 3000,
+                                                        "hasta5": None, "mas5": None}}, "2026T2")
+        try:
+            _mun, _per = _pcm._carga_municipal(forzar=True)
+            check(_mun.get("28079", {}).get("euros_m2") == 3000 and _per == "2026T2",
+                  "el refresco municipal descarga, valida y guarda la caché")
+        except Exception as _e:
+            check(False, f"el refresco municipal no revienta ({type(_e).__name__}: {_e})")
+finally:
+    _pcm.CACHE_DIR, _pcm.httpx.stream, _pcm._lee_xls_municipal = _orig
+
+
 print(f"\n{'='*54}")
 print(f"  {'TODO OK' if not fallos else 'FALLOS: ' + str(len(fallos))}"
       f" — {len(fallos)} fallo(s)")
